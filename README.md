@@ -202,6 +202,23 @@ empresa..."**. Assim que o backend responde, a interface mostra as salas,
 agentes e um painel de eventos em tempo real demonstrando o raciocínio e as
 decisões de cada agente.
 
+## Inicializador para automação
+
+Para cenários sem interface visual há o script `start_backend.py`. Ele
+inicia apenas o backend FastAPI e já executa todo o processo de
+inicialização automática (salas, agentes, ciclo criativo, RH). Antes de
+executar, defina a variável `OPENROUTER_API_KEY` ou crie o arquivo
+`.openrouter_key` com sua chave. Não há qualquer prompt interativo.
+
+```bash
+export OPENROUTER_API_KEY=XXXX
+python start_backend.py
+```
+
+O backend ficará acessível em `http://localhost:8000` (ou na porta
+informada em `BACKEND_PORT`). Todos os endpoints podem ser consumidos pelo
+`cli.py` ou por agentes externos para testes e simulações automatizadas.
+
 ## Testes Automatizados
 
 Uma bateria de testes em `pytest` valida as partes isoladas do sistema e o comportamento integrado.
