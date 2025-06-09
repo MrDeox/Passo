@@ -10,6 +10,8 @@ ROOT = Path(__file__).parent
 BACKEND_PORT = os.environ.get("BACKEND_PORT", "8000")
 FRONTEND_PORT = os.environ.get("FRONTEND_PORT", "5173")
 KEY_FILE = ROOT / ".openrouter_key"
+DATA_AGENTES = ROOT / "agentes.json"
+DATA_LOCAIS = ROOT / "locais.json"
 
 
 def ensure_api_key() -> None:
@@ -54,6 +56,9 @@ def show_status(port: str) -> None:
 def main() -> None:
     ensure_api_key()
     install_dependencies()
+    print("Arquivos de dados serao armazenados em:")
+    print(f"  Agentes: {DATA_AGENTES}")
+    print(f"  Locais: {DATA_LOCAIS}")
 
     backend_cmd = [sys.executable, "-m", "uvicorn", "api:app", "--reload", "--port", BACKEND_PORT]
     backend_log = open(ROOT / "backend.log", "w")
