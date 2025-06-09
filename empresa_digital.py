@@ -203,6 +203,103 @@ def gerar_prompt_dinamico(agente: Agente) -> str:
     return "\n".join(partes)
 
 
+def gerar_prompt_decisao(agente: Agente) -> str:
+    """Monta um prompt completo solicitando a próxima ação do agente.
+
+    O prompt descreve o contexto atual e instrui a IA a escolher entre
+    ficar na sala, mover-se para outro local ou enviar uma mensagem para
+    um colega. A resposta deve ser unicamente em JSON seguindo o formato
+    exemplificado na mensagem.
+    """
+
+    if agente.local_atual is None:
+        contexto = f"Agente {agente.nome} está sem local definido."
+    else:
+        local = agente.local_atual
+        colegas = [a.nome for a in local.agentes_presentes if a is not agente]
+        contexto = "\n".join(
+            [
+                f"Agente: {agente.nome}",
+                f"Função: {agente.funcao}",
+                f"Local: {local.nome} - {local.descricao}",
+                (
+                    "Colegas presentes: "
+                    + (", ".join(colegas) if colegas else "Nenhum")
+                ),
+                (
+                    "Inventário disponível: "
+                    + (", ".join(local.inventario) if local.inventario else "Nenhum")
+                ),
+                (
+                    "Outros locais disponíveis: "
+                    + ", ".join(nome for nome in locais if nome != local.nome)
+                ),
+            ]
+        )
+
+    instrucoes = (
+        "Escolha UMA das ações a seguir e responda apenas em JSON:\n"
+        "1. 'ficar' - permanecer no local atual.\n"
+        "2. 'mover' - ir para outro local. Use o campo 'local' com o destino.\n"
+        "3. 'mensagem' - enviar uma mensagem. Use 'destinatario' e 'texto'.\n"
+        "Exemplos:\n"
+        '{"acao": "ficar"}\n'
+        '{"acao": "mover", "local": "Sala de Reunião"}\n'
+        '{"acao": "mensagem", "destinatario": "Bob", "texto": "bom dia"}'
+    )
+
+    return f"{contexto}\n\n{instrucoes}"
+
+
+def enviar_para_llm(agente: Agente, prompt: str) -> str:
+    """Simula o envio do prompt para o modelo LLM do agente.
+
+    No lugar da chamada real à API, apenas imprime o prompt e retorna uma
+    string fixa representando a resposta da IA. Em um cenário real, esta
+    função faria a requisição de rede ao provedor de LLM configurado.
+    """
+
+    print(f"\n--- Prompt enviado para {agente.modelo_llm} ({agente.nome}) ---")
+    print(prompt)
+    print("--- Fim do prompt ---\n")
+
+    # Resposta simulada apenas para fins de demonstração.
+    respostas_simuladas = {
+        "Alice": '{"acao": "mover", "local": "Sala de Reunião"}',
+        "Bob": '{"acao": "mensagem", "destinatario": "Carol", "texto": "Preciso de ajuda"}',
+        "Carol": '{"acao": "ficar"}',
+    }
+    return respostas_simuladas.get(agente.nome, '{"acao": "ficar"}')
+
+
+def executar_resposta(agente: Agente, resposta: str) -> None:
+    """Executa a ação retornada pelo LLM para o agente."""
+
+    try:
+        dados = json.loads(resposta)
+    except json.JSONDecodeError:
+        print(f"Resposta inválida para {agente.nome}: {resposta}")
+        return
+
+    acao = dados.get("acao")
+
+    if acao == "ficar":
+        print(f"{agente.nome} permanece em {agente.local_atual.nome}.")
+    elif acao == "mover":
+        destino = dados.get("local")
+        if destino and destino in locais:
+            mover_agente(agente.nome, destino)
+            print(f"{agente.nome} moveu-se para {destino}.")
+        else:
+            print(f"Destino invalido para {agente.nome}: {destino}")
+    elif acao == "mensagem":
+        dest = dados.get("destinatario")
+        texto = dados.get("texto", "")
+        print(f"{agente.nome} envia mensagem para {dest}: {texto}")
+    else:
+        print(f"Acao desconhecida para {agente.nome}: {acao}")
+
+
 # ---------------------------------------------------------------------------
 # Exemplo de uso
 # ---------------------------------------------------------------------------
@@ -249,3 +346,9 @@ if __name__ == "__main__":
     print("\nEstado restaurado do disco:")
     for agente in agentes.values():
         print(f"- {agente.nome} está em {agente.local_atual.nome}")
+
+    # Demonstrar decisões baseadas em prompt para cada agente
+    for agente in agentes.values():
+        prompt = gerar_prompt_decisao(agente)
+        resposta = enviar_para_llm(agente, prompt)
+        executar_resposta(agente, resposta)
