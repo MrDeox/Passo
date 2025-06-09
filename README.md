@@ -77,6 +77,16 @@ Estado emocional: 1
 No ciclo seguinte, após nova ação, o histórico muda e o estado emocional é
 ajustado conforme o sucesso ou falha, alterando também o prompt enviado.
 
+## Módulo RH automático
+
+O backend possui o arquivo `rh.py`, que implementa um pequeno sistema de RH.
+Ele é executado a cada ciclo de simulação e verifica se alguma sala ou função
+está com menos agentes do que o mínimo configurado. Caso haja carência ou
+tarefas registradas em `tarefas_pendentes`, o módulo cria automaticamente um
+novo agente (com nome e modelo padrão) e registra a contratação no log. Os
+agentes gerados participam normalmente dos próximos ciclos e aparecem no
+dashboard. Novas tarefas podem ser adicionadas pela função `adicionar_tarefa`.
+
 ## API REST
 
 A aplicação possui uma API REST construída com **FastAPI** disponível no arquivo `api.py`.

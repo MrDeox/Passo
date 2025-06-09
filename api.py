@@ -15,6 +15,7 @@ from empresa_digital import (
     enviar_para_llm,
     executar_resposta,
 )
+from rh import modulo_rh
 
 # Instância principal da aplicação FastAPI
 app = FastAPI(title="Empresa Digital API")
@@ -197,6 +198,8 @@ async def remover_local(nome: str):
 @app.post("/ciclo/next")
 async def proximo_ciclo():
     """Executa um ciclo para todos os agentes cadastrados."""
+    # Antes de iniciar o ciclo, o modulo de RH verifica se deve contratar
+    modulo_rh.verificar()
     resultados = []
     for ag in agentes.values():
         prompt = gerar_prompt_decisao(ag)

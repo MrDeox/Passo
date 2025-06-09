@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import json
 
+# Lista global de tarefas pendentes que podem ser atribuídas a novos agentes
+tarefas_pendentes: List[str] = []
+
 # Dicionários globais para armazenar os agentes e os locais cadastrados.
 agentes: Dict[str, "Agente"] = {}
 locais: Dict[str, "Local"] = {}
@@ -147,6 +150,11 @@ def mover_agente(nome_agente: str, nome_novo_local: str) -> None:
         raise ValueError(f"Local '{nome_novo_local}' não encontrado.")
 
     agente.mover_para(novo_local)
+
+
+def adicionar_tarefa(tarefa: str) -> None:
+    """Registra uma nova tarefa pendente."""
+    tarefas_pendentes.append(tarefa)
 
 
 def salvar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
@@ -442,9 +450,12 @@ if __name__ == "__main__":
 
     # Demonstrar várias iterações de decisões para evidenciar a evolução do
     # histórico e do prompt adaptativo
+    from rh import modulo_rh
+
     for ciclo in range(1, 4):
         print(f"\n=== Ciclo {ciclo} ===")
-        for agente in agentes.values():
+        modulo_rh.verificar()
+        for agente in list(agentes.values()):
             prompt = gerar_prompt_decisao(agente)
             resposta = enviar_para_llm(agente, prompt)
             executar_resposta(agente, resposta)
