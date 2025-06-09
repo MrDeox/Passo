@@ -100,6 +100,11 @@ npm run dev
 
 A interface abrirá em `http://localhost:5173`. Ela exibe as salas e agentes em tempo real. Utilize o botão **Próximo Ciclo** para simular novas iterações e visualizar o impacto no lucro.
 
+#### Sele\u00e7\u00e3o autom\u00e1tica de modelo
+
+Ao abrir o formul\u00e1rio de cria\u00e7\u00e3o de agentes o dashboard requisita ao backend a lista de modelos gratuitos da OpenRouter.\
+Ap\u00f3s preencher nome, fun\u00e7\u00e3o e sala o frontend consulta o endpoint `/agentes/escolher-modelo`, que retorna o modelo mais adequado e o motivo da escolha. Esse valor \u00e9 exibido em tela e utilizado na cria\u00e7\u00e3o do agente.
+
 ## Como Contribuir e Expandir
 
 1. **Novos Agentes**: crie subclasses ou novas funções no `empresa_digital.py`, especifique modelos de LLM diferentes ou comportamentos customizados.

@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
+import requests
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -90,7 +91,74 @@ class LocalUpdate(BaseModel):
     inventario: Optional[List[str]] = None
 
 
+class EscolherModeloIn(BaseModel):
+    """Dados enviados para decidir o melhor modelo para o agente."""
+
+    nome: str
+    funcao: str
+    sala: str
+
+
+class ModeloEscolhido(BaseModel):
+    """Resposta contendo o modelo definido automaticamente."""
+
+    modelo: str
+    raciocinio: str
+
+
+def _buscar_modelos_gratis() -> List[str]:
+    """Retorna todos os modelos gratuitos dispon\u00edveis na OpenRouter."""
+    url = "https://openrouter.ai/api/v1/models"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return [m["id"] for m in data.get("data", []) if ":free" in m.get("id", "")]
+
+
+def _escolher_modelo(funcao: str, modelos: List[str]) -> Tuple[str, str]:
+    """Decide qual modelo usar de forma simplificada."""
+    f = funcao.lower()
+    # Heuristica simples para demonstracao, substitui uma chamada real a um LLM
+    if any(term in f for term in ["dev", "engenheiro", "developer"]):
+        for m in modelos:
+            if "deepseek" in m:
+                return (
+                    m,
+                    "Funcao tecnica detectada; modelo DeepSeek escolhido por ser otimizado para codigo.",
+                )
+    if any(term in f for term in ["ceo", "diretor", "gerente"]):
+        for m in modelos:
+            if "phi-4" in m or "llama" in m:
+                return (
+                    m,
+                    "Funcao gerencial; modelo avançado selecionado para apoio estrategico.",
+                )
+    return (
+        modelos[0] if modelos else "",
+        "Funcao generica; primeiro modelo gratuito utilizado.",
+    )
+
+
 # ---------------------------- Endpoints de agentes ----------------------------
+
+@app.get("/modelos-livres", response_model=List[str])
+def modelos_livres_endpoint():
+    """Lista todos os modelos gratuitos retornados pela OpenRouter."""
+    try:
+        return _buscar_modelos_gratis()
+    except Exception as exc:
+        logging.error("Erro ao buscar modelos: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/agentes/escolher-modelo", response_model=ModeloEscolhido)
+def escolher_modelo_endpoint(dados: EscolherModeloIn):
+    """Determina automaticamente o modelo de LLM para um novo agente."""
+    modelos = _buscar_modelos_gratis()
+    modelo, motivo = _escolher_modelo(dados.funcao, modelos)
+    logging.info("Modelo %s escolhido para %s - %s", modelo, dados.nome, motivo)
+    return ModeloEscolhido(modelo=modelo, raciocinio=motivo)
+
 @app.get("/agentes")
 async def listar_agentes():
     """Retorna todos os agentes e suas informações."""
