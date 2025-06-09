@@ -76,3 +76,26 @@ Estado emocional: 1
 
 No ciclo seguinte, após nova ação, o histórico muda e o estado emocional é
 ajustado conforme o sucesso ou falha, alterando também o prompt enviado.
+
+## API REST
+
+A aplicação possui uma API REST construída com **FastAPI** disponível no arquivo `api.py`.
+Para utilizar instale as dependências e execute o servidor com o `uvicorn`:
+
+```bash
+pip install -r requirements.txt
+uvicorn api:app --reload
+```
+
+Os principais endpoints retornam dados em JSON:
+
+- `GET /agentes` – lista todos os agentes cadastrados.
+- `POST /agentes` – cria um novo agente.
+- `PUT /agentes/{nome}` – atualiza informações ou move o agente de local.
+- `DELETE /agentes/{nome}` – remove o agente.
+- `GET /locais` – mostra todas as salas e quem está em cada uma.
+- `POST /locais` – cria uma nova sala.
+- `PUT /locais/{nome}` – edita a sala existente.
+- `DELETE /locais/{nome}` – exclui a sala.
+- `POST /ciclo/next` – executa um novo ciclo da simulação para todos os agentes.
+
