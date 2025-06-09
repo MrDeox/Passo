@@ -168,3 +168,27 @@ npm run dev
 ```
 
 O mapa e as tabelas são atualizados a cada ciclo disparado pelo botão "Próximo ciclo" e apenas refletem as decisões automáticas do backend.
+
+## Inicializador Automático
+
+Para subir todo o sistema com um único comando existe o script `start_empresa.py`.
+Ele instala dependências, solicita a chave da OpenRouter na primeira execução e
+inicia backend e frontend de forma integrada:
+
+```bash
+python start_empresa.py
+```
+
+Etapas realizadas pelo script:
+
+1. Caso não exista o arquivo `.openrouter_key`, pede a sua API Key e salva
+   localmente.
+2. Instala os pacotes Python listados em `requirements.txt`.
+3. Garante que as dependências do dashboard estejam instaladas (`npm install`).
+4. Inicia o backend na porta 8000 e aguarda ele ficar disponível.
+5. Inicia o frontend na porta 5173 e mostra os endereços de acesso.
+6. Consulta a API para informar quais agentes e salas foram criados
+   automaticamente.
+
+Após a primeira execução a chave é reutilizada e o sistema pode ser iniciado
+novamente apenas rodando o mesmo comando.
