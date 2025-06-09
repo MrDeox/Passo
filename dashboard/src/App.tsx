@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from './components/ui/Button'
 import { Input } from './components/ui/Input'
 import { Card } from './components/ui/Card'
+import { CompanyMap } from './components/CompanyMap'
 
 interface Agent {
   id: number
@@ -106,6 +107,25 @@ export default function App() {
     setNewSala({})
   }
 
+  function handleMoveAgent(id: number, sala: string) {
+    setAgents(prev =>
+      prev.map(a => (a.id === id ? { ...a, salaAtual: sala } : a))
+    )
+    const ag = agents.find(a => a.id === id)
+    if (ag) {
+      setTimeline(prev => [
+        {
+          id: Date.now(),
+          agente: ag.nome,
+          acao: 'Arrasto',
+          sala,
+          motivo: 'Movido manualmente'
+        },
+        ...prev
+      ].slice(0, 50))
+    }
+  }
+
   function proximoCiclo() {
     const eventos: TimelineItem[] = []
     setAgents(prev => {
@@ -183,6 +203,11 @@ export default function App() {
           </Card>
 
       </div>
+
+      <Card>
+        <h2 className="text-xl font-semibold mb-2">Mapa da Empresa</h2>
+        <CompanyMap agentes={agents} salas={salas} onMove={handleMoveAgent} />
+      </Card>
 
       <div className="flex space-x-6">
         <Card className="flex-1">
