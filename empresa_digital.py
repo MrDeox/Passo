@@ -285,7 +285,7 @@ def gerar_prompt_dinamico(agente: Agente) -> str:
             + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
         ),
         f"Objetivo atual: {agente.objetivo_atual or 'Nenhum'}",
-        "Objetivo principal: maximizar o lucro da empresa",
+        "Objetivo principal: maximizar o lucro da empresa de forma autônoma e criativa",
         f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
         f"Estado emocional: {agente.estado_emocional}",
     ]
@@ -336,14 +336,14 @@ def gerar_prompt_decisao(agente: Agente) -> str:
                     + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
                 ),
                 f"Objetivo: {agente.objetivo_atual or 'Nenhum'}",
-                "Objetivo principal: maximizar o lucro da empresa",
+                "Objetivo principal: maximizar o lucro da empresa de forma autônoma e criativa",
                 f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
                 f"Estado emocional: {agente.estado_emocional}",
             ]
         )
 
     instrucoes = (
-        "Seu objetivo final é maximizar o lucro da empresa.\n"
+        "Seu objetivo final é maximizar o lucro da empresa de forma autônoma e criativa.\n"
         "Escolha UMA das ações a seguir e responda apenas em JSON:\n"
         "1. 'ficar' - permanecer no local atual.\n"
         "2. 'mover' - ir para outro local. Use o campo 'local' com o destino.\n"

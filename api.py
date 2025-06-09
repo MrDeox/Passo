@@ -19,6 +19,7 @@ from empresa_digital import (
     executar_resposta,
 )
 from rh import modulo_rh
+from ciclo_criativo import executar_ciclo_criativo, historico_ideias
 
 # Instância principal da aplicação FastAPI
 app = FastAPI(title="Empresa Digital API")
@@ -203,6 +204,8 @@ async def proximo_ciclo():
     """Executa um ciclo para todos os agentes cadastrados."""
     # Antes de iniciar o ciclo, o modulo de RH verifica se deve contratar
     modulo_rh.verificar()
+    # Ciclo criativo automatico de ideacao e validacao
+    executar_ciclo_criativo()
     resultados = []
     for ag in agentes.values():
         prompt = gerar_prompt_decisao(ag)
@@ -214,5 +217,16 @@ async def proximo_ciclo():
         "agentes": resultados,
         "saldo": lucro_info["saldo"],
         "historico_saldo": historico_saldo,
+        "ideias": [
+            {
+                "descricao": i.descricao,
+                "justificativa": i.justificativa,
+                "autor": i.autor,
+                "validada": i.validada,
+                "executada": i.executada,
+                "resultado": i.resultado,
+            }
+            for i in historico_ideias
+        ],
     }
 
