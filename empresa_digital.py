@@ -26,6 +26,13 @@ tarefas_pendentes: List[str] = []
 agentes: Dict[str, "Agente"] = {}
 locais: Dict[str, "Local"] = {}
 
+historico_eventos: List[str] = []
+
+
+def registrar_evento(msg: str) -> None:
+    historico_eventos.append(msg)
+    logging.info("EVENTO: %s", msg)
+
 
 @dataclass
 class Local:
@@ -436,6 +443,7 @@ def gerar_prompt_decisao(agente: Agente) -> str:
 
 
 def enviar_para_llm(agente: Agente, prompt: str) -> str:
+    registrar_evento(f"Prompt para {agente.nome}")
     """Simula o envio do prompt para o modelo LLM do agente.
 
     No lugar da chamada real à API, apenas imprime o prompt e retorna uma
@@ -453,7 +461,9 @@ def enviar_para_llm(agente: Agente, prompt: str) -> str:
         "Bob": '{"acao": "mensagem", "destinatario": "Carol", "texto": "Preciso de ajuda"}',
         "Carol": '{"acao": "ficar"}',
     }
-    return respostas_simuladas.get(agente.nome, '{"acao": "ficar"}')
+    resp = respostas_simuladas.get(agente.nome, '{"acao": "ficar"}')
+    registrar_evento(f"Resposta de {agente.nome}: {resp}")
+    return resp
 
 
 def executar_resposta(agente: Agente, resposta: str) -> None:
@@ -462,33 +472,45 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
     try:
         dados = json.loads(resposta)
     except json.JSONDecodeError:
-        print(f"Resposta inválida para {agente.nome}: {resposta}")
+        msg = f"Resposta inválida para {agente.nome}: {resposta}"
+        registrar_evento(msg)
+        print(msg)
         return
 
     acao = dados.get("acao")
 
     if acao == "ficar":
-        print(f"{agente.nome} permanece em {agente.local_atual.nome}.")
+        msg = f"{agente.nome} permanece em {agente.local_atual.nome}."
+        registrar_evento(msg)
+        print(msg)
         agente.registrar_acao("ficar -> ok", True)
     elif acao == "mover":
         destino = dados.get("local")
         if destino and destino in locais:
             mover_agente(agente.nome, destino)
-            print(f"{agente.nome} moveu-se para {destino}.")
+            msg = f"{agente.nome} moveu-se para {destino}."
+            registrar_evento(msg)
+            print(msg)
             agente.registrar_acao(f"mover para {destino} -> ok", True)
         else:
-            print(f"Destino invalido para {agente.nome}: {destino}")
+            msg = f"Destino invalido para {agente.nome}: {destino}"
+            registrar_evento(msg)
+            print(msg)
             agente.registrar_acao(f"mover para {destino} -> falha", False)
     elif acao == "mensagem":
         dest = dados.get("destinatario")
         texto = dados.get("texto", "")
-        print(f"{agente.nome} envia mensagem para {dest}: {texto}")
+        msg = f"{agente.nome} envia mensagem para {dest}: {texto}"
+        registrar_evento(msg)
+        print(msg)
         agente.historico_interacoes.append(f"para {dest}: {texto}")
         if len(agente.historico_interacoes) > 3:
             agente.historico_interacoes = agente.historico_interacoes[-3:]
         agente.registrar_acao(f"mensagem para {dest}", True)
     else:
-        print(f"Acao desconhecida para {agente.nome}: {acao}")
+        msg = f"Acao desconhecida para {agente.nome}: {acao}"
+        registrar_evento(msg)
+        print(msg)
         agente.registrar_acao(f"acao desconhecida: {acao}", False)
 
 

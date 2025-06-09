@@ -63,6 +63,11 @@ def main() -> None:
         return
     print(f"Backend rodando em http://localhost:{BACKEND_PORT}")
     show_status(BACKEND_PORT)
+    # Gatilho do primeiro ciclo automatico logo apos o backend iniciar
+    try:
+        requests.post(f"http://localhost:{BACKEND_PORT}/ciclo/next", timeout=5)
+    except Exception as exc:
+        print("Falha ao disparar ciclo inicial:", exc)
 
     frontend_cmd = ["npm", "run", "dev", "--", "--port", FRONTEND_PORT]
     frontend = subprocess.Popen(frontend_cmd, cwd=ROOT / "dashboard")
