@@ -153,6 +153,7 @@ Os principais endpoints retornam dados em JSON:
 - `POST /locais` – cria uma nova sala.
 - `PUT /locais/{nome}` – edita a sala existente.
 - `DELETE /locais/{nome}` – exclui a sala.
+- `GET /lucro` – retorna o saldo atual e o histórico acumulado.
 - `POST /ciclo/next` – executa um novo ciclo da simulação para todos os agentes.
 
 

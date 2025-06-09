@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Button } from './components/ui/Button'
 import { Card } from './components/ui/Card'
 import { CompanyMap } from './components/CompanyMap'
@@ -36,44 +36,108 @@ export default function App() {
   const [historicoSaldo, setHistoricoSaldo] = useState<number[]>([])
   const [eventos, setEventos] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const lastEventos = useRef<string[]>([])
 
+  // Busca dados da API e atualiza todos os painéis do dashboard.
+  // Esta função é chamada no carregamento inicial e em intervalos regulares.
   async function loadData() {
     try {
-      const ag = await fetch(`${API_URL}/agentes`).then(r => r.json())
-      const sl = await fetch(`${API_URL}/locais`).then(r => r.json())
-      const ev = await fetch(`${API_URL}/eventos`).then(r => r.json())
+      setError(null)
+      const [ag, sl, ev, lc] = await Promise.all([
+        fetch(`${API_URL}/agentes`).then(r => {
+          if (!r.ok) throw new Error('agentes')
+          return r.json()
+        }),
+        fetch(`${API_URL}/locais`).then(r => {
+          if (!r.ok) throw new Error('locais')
+          return r.json()
+        }),
+        fetch(`${API_URL}/eventos`).then(r => {
+          if (!r.ok) throw new Error('eventos')
+          return r.json()
+        }),
+        fetch(`${API_URL}/lucro`).then(r => {
+          if (!r.ok) throw new Error('lucro')
+          return r.json()
+        }),
+      ])
+
+      const prev = agents
+
+      // Atualiza estados principais
       setAgents(ag)
       setSalas(sl)
       setEventos(ev)
+      setSaldo(lc.saldo || 0)
+      setHistoricoSaldo(lc.historico_saldo || [])
+
+      // Gera itens da linha do tempo comparando ações mais recentes
+      const novos: TimelineItem[] = []
+      ag.forEach(a => {
+        const anterior = prev.find(p => p.nome === a.nome)
+        if (!anterior) return
+        const ultima = a.historico_acoes[a.historico_acoes.length - 1]
+        const antUltima = anterior.historico_acoes[anterior.historico_acoes.length - 1]
+        if (ultima && ultima !== antUltima) {
+          novos.push({ id: Date.now() + novos.length, agente: a.nome, acao: ultima, sala: a.local_atual || '' })
+        }
+      })
+      ev.forEach((txt, idx) => {
+        if (!lastEventos.current.includes(txt)) {
+          novos.push({ id: Date.now() + novos.length + idx, agente: '', acao: txt, sala: '' })
+        }
+      })
+      lastEventos.current = ev
+      if (novos.length) setTimeline(tl => [...novos, ...tl].slice(0, 50))
+
+      if ((!ag || ag.length === 0) && (!sl || sl.length === 0)) {
+        setError('Nenhum dado retornado do backend.')
+      }
+    } catch (err) {
+      setError(`Erro ao carregar dados: ${err}`)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { loadData() }, [])
+  // Carrega os dados iniciais e agenda atualizações periódicas
+  useEffect(() => {
+    loadData()
+    const id = setInterval(loadData, 5000)
+    return () => clearInterval(id)
+  }, [])
 
+  // Dispara manualmente um novo ciclo e atualiza as informacoes na tela
   async function proximoCiclo() {
-    const prev = agents
-    const data = await fetch(`${API_URL}/ciclo/next`, { method: 'POST' }).then(r => r.json())
-    setAgents(data.agentes)
-    setSaldo(data.saldo)
-    setHistoricoSaldo(data.historico_saldo)
-    setEventos(data.eventos)
+    try {
+      const prev = agents
+      const resp = await fetch(`${API_URL}/ciclo/next`, { method: 'POST' })
+      if (!resp.ok) throw new Error('ciclo')
+      const data = await resp.json()
+      setAgents(data.agentes)
+      setSaldo(data.saldo)
+      setHistoricoSaldo(data.historico_saldo)
+      setEventos(data.eventos)
 
-    const eventos: TimelineItem[] = []
-    data.agentes.forEach((a: Agent) => {
-      const anterior = prev.find(p => p.nome === a.nome)
-      if (!anterior) return
-      const ultima = a.historico_acoes[a.historico_acoes.length - 1]
-      const antUltima = anterior.historico_acoes[anterior.historico_acoes.length - 1]
-      if (ultima && ultima !== antUltima) {
-        eventos.push({ id: Date.now() + eventos.length, agente: a.nome, acao: ultima, sala: a.local_atual || '' })
-      }
-    })
-    data.eventos.forEach((txt: string, idx: number) => {
-      eventos.push({ id: Date.now() + eventos.length + idx, agente: '', acao: txt, sala: '' })
-    })
-    if (eventos.length) setTimeline(prevTl => [...eventos, ...prevTl].slice(0, 50))
+      const eventos: TimelineItem[] = []
+      data.agentes.forEach((a: Agent) => {
+        const anterior = prev.find(p => p.nome === a.nome)
+        if (!anterior) return
+        const ultima = a.historico_acoes[a.historico_acoes.length - 1]
+        const antUltima = anterior.historico_acoes[anterior.historico_acoes.length - 1]
+        if (ultima && ultima !== antUltima) {
+          eventos.push({ id: Date.now() + eventos.length, agente: a.nome, acao: ultima, sala: a.local_atual || '' })
+        }
+      })
+      data.eventos.forEach((txt: string, idx: number) => {
+        eventos.push({ id: Date.now() + eventos.length + idx, agente: '', acao: txt, sala: '' })
+      })
+      lastEventos.current = data.eventos
+      if (eventos.length) setTimeline(prevTl => [...eventos, ...prevTl].slice(0, 50))
+    } catch (err) {
+      setError(`Erro ao executar ciclo: ${err}`)
+    }
   }
 
   return (
@@ -84,6 +148,7 @@ export default function App() {
         </div>
       )}
       <h1 className="text-2xl font-bold">Dashboard</h1>
+      {error && <p className="text-red-600">{error}</p>}
 
       <Card>
         <h2 className="text-xl font-semibold mb-2">Mapa da Empresa</h2>
