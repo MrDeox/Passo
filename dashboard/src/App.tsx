@@ -34,12 +34,20 @@ export default function App() {
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [saldo, setSaldo] = useState(0)
   const [historicoSaldo, setHistoricoSaldo] = useState<number[]>([])
+  const [eventos, setEventos] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
 
   async function loadData() {
-    const ag = await fetch(`${API_URL}/agentes`).then(r => r.json())
-    const sl = await fetch(`${API_URL}/locais`).then(r => r.json())
-    setAgents(ag)
-    setSalas(sl)
+    try {
+      const ag = await fetch(`${API_URL}/agentes`).then(r => r.json())
+      const sl = await fetch(`${API_URL}/locais`).then(r => r.json())
+      const ev = await fetch(`${API_URL}/eventos`).then(r => r.json())
+      setAgents(ag)
+      setSalas(sl)
+      setEventos(ev)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { loadData() }, [])
@@ -50,6 +58,7 @@ export default function App() {
     setAgents(data.agentes)
     setSaldo(data.saldo)
     setHistoricoSaldo(data.historico_saldo)
+    setEventos(data.eventos)
 
     const eventos: TimelineItem[] = []
     data.agentes.forEach((a: Agent) => {
@@ -61,11 +70,19 @@ export default function App() {
         eventos.push({ id: Date.now() + eventos.length, agente: a.nome, acao: ultima, sala: a.local_atual || '' })
       }
     })
+    data.eventos.forEach((txt: string, idx: number) => {
+      eventos.push({ id: Date.now() + eventos.length + idx, agente: '', acao: txt, sala: '' })
+    })
     if (eventos.length) setTimeline(prevTl => [...eventos, ...prevTl].slice(0, 50))
   }
 
   return (
     <div className="min-h-screen bg-gray-100 p-6 space-y-6">
+      {loading && (
+        <div className="fixed inset-0 flex items-center justify-center bg-white/80 z-50">
+          <p className="text-xl font-semibold">Carregando/Iniciando a empresa...</p>
+        </div>
+      )}
       <h1 className="text-2xl font-bold">Dashboard</h1>
 
       <Card>
@@ -122,9 +139,19 @@ export default function App() {
             {timeline.map(ev => (
               <div key={ev.id} className="border-b pb-1">
                 <p className="text-sm">
-                  <span className="font-medium">{ev.agente}</span> {ev.acao} em {ev.sala}
+                  <span className="font-medium">{ev.agente}</span> {ev.acao} {ev.sala}
                 </p>
               </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="flex-1">
+          <h2 className="text-xl font-semibold mb-2">Eventos</h2>
+          <div className="space-y-1 max-h-96 overflow-auto text-sm">
+            {eventos.length === 0 && <p className="text-gray-600">Nenhum evento</p>}
+            {eventos.map((e, i) => (
+              <div key={i} className="border-b pb-1">{e}</div>
             ))}
           </div>
         </Card>

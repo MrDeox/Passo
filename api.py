@@ -20,6 +20,8 @@ from empresa_digital import (
     enviar_para_llm,
     executar_resposta,
     inicializar_automaticamente,
+    historico_eventos,
+    registrar_evento,
 )
 from rh import modulo_rh
 from ciclo_criativo import executar_ciclo_criativo, historico_ideias
@@ -35,6 +37,16 @@ app = FastAPI(title="Empresa Digital API")
 def _startup() -> None:
     """Inicializa a empresa de forma totalmente autônoma."""
     inicializar_automaticamente()
+    # Dispara automaticamente o primeiro ciclo de simulacao
+    historico_eventos.clear()
+    registrar_evento("Inicio automatico da empresa")
+    modulo_rh.verificar()
+    executar_ciclo_criativo()
+    for ag in list(agentes.values()):
+        prompt = gerar_prompt_decisao(ag)
+        resp = enviar_para_llm(ag, prompt)
+        executar_resposta(ag, resp)
+    calcular_lucro_ciclo()
 
 
 def agente_to_dict(ag: Agente) -> dict:
@@ -277,6 +289,13 @@ async def remover_local(nome: str):
     return {"ok": True}
 
 
+# ----------------------------- Eventos em tempo real -------------------------
+@app.get("/eventos")
+async def listar_eventos():
+    """Retorna a lista de eventos registrados no último ciclo."""
+    return list(historico_eventos)
+
+
 # ---------------------------- Controle da simulação ---------------------------
 @app.post("/ciclo/next")
 async def proximo_ciclo():
@@ -286,6 +305,7 @@ async def proximo_ciclo():
     # Ciclo criativo automatico de ideacao e validacao
     executar_ciclo_criativo()
     resultados = []
+    historico_eventos.clear()
     for ag in agentes.values():
         prompt = gerar_prompt_decisao(ag)
         resp = enviar_para_llm(ag, prompt)
@@ -296,6 +316,7 @@ async def proximo_ciclo():
         "agentes": resultados,
         "saldo": lucro_info["saldo"],
         "historico_saldo": historico_saldo,
+        "eventos": list(historico_eventos),
         "ideias": [
             {
                 "descricao": i.descricao,

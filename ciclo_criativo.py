@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Dict
 
-from empresa_digital import agentes, adicionar_tarefa
+from empresa_digital import agentes, adicionar_tarefa, registrar_evento
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ def propor_ideias() -> List[Ideia]:
             ideia = Ideia(descricao=desc, justificativa=justificativa, autor=ag.nome)
             ideias.append(ideia)
             logger.info("Ideia proposta: %s", desc)
+            registrar_evento(f"Ideia proposta: {desc}")
     return ideias
 
 
@@ -51,6 +52,9 @@ def validar_ideias(ideias: List[Ideia]) -> None:
                 ideia.descricao,
                 val.nome,
                 "aprovada" if aprovado else "reprovada",
+            )
+            registrar_evento(
+                f"Validacao de {ideia.descricao} por {val.nome}: {'aprovada' if aprovado else 'reprovada'}"
             )
             if aprovado:
                 ideia.validada = True
@@ -72,6 +76,9 @@ def prototipar_ideias(ideias: List[Ideia]) -> None:
             "Prototipo de %s resultou em %.2f",
             ideia.descricao,
             ideia.resultado,
+        )
+        registrar_evento(
+            f"Prototipo de {ideia.descricao} resultou em {ideia.resultado:.2f}"
         )
 
 

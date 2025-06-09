@@ -189,6 +189,13 @@ Etapas realizadas pelo script:
 5. Inicia o frontend na porta 5173 e mostra os endereços de acesso.
 6. Consulta a API para informar quais agentes e salas foram criados
    automaticamente.
+7. Dispara automaticamente o primeiro ciclo da simulação e envia os eventos
+   iniciais para o dashboard.
 
 Após a primeira execução a chave é reutilizada e o sistema pode ser iniciado
 novamente apenas rodando o mesmo comando.
+
+Durante o carregamento o dashboard exibe a mensagem **"Carregando/Iniciando a
+empresa..."**. Assim que o backend responde, a interface mostra as salas,
+agentes e um painel de eventos em tempo real demonstrando o raciocínio e as
+decisões de cada agente.

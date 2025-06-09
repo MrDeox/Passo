@@ -14,6 +14,7 @@ from empresa_digital import (
     tarefas_pendentes,
     saldo,
     selecionar_modelo,
+    registrar_evento,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class ModuloRH:
         """Verifica carencias e contrata novos agentes se necessario."""
         if saldo <= 0:
             logger.info("Saldo insuficiente, nenhuma contratacao realizada")
+            registrar_evento("RH: saldo insuficiente para contratar")
             return
 
         contratou = False
@@ -47,12 +49,14 @@ class ModuloRH:
                 nome = self._novo_nome()
                 modelo, motivo = selecionar_modelo("Funcionario")
                 criar_agente(nome, "Funcionario", modelo, local.nome)
+                msg = f"RH contratou {nome} para {local.nome} - {motivo}"
                 logger.info(
                     "Novo agente %s alocado em %s por falta de pessoal - %s",
                     nome,
                     local.nome,
                     motivo,
                 )
+                registrar_evento(msg)
                 contratou = True
 
         # Conta agentes por funcao
@@ -66,6 +70,9 @@ class ModuloRH:
                 if primeiro_local:
                     modelo, motivo = selecionar_modelo(funcao)
                     criar_agente(nome, funcao, modelo, primeiro_local.nome)
+                    msg = (
+                        f"RH contratou {nome} para funcao {funcao} - {motivo}"
+                    )
                     logger.info(
                         "Novo agente %s contratado para funcao %s (apenas %d existentes) - %s",
                         nome,
@@ -73,6 +80,7 @@ class ModuloRH:
                         qtd,
                         motivo,
                     )
+                    registrar_evento(msg)
                     contratou = True
 
         # Cria agentes para tarefas pendentes
@@ -89,16 +97,19 @@ class ModuloRH:
                     primeiro_local.nome,
                     objetivo=tarefa,
                 )
+                msg = f"RH criou {nome} para tarefa '{tarefa}' - {motivo}"
                 logger.info(
                     "Agente %s criado para tarefa pendente '%s' - %s",
                     nome,
                     tarefa,
                     motivo,
                 )
+                registrar_evento(msg)
                 contratou = True
 
         if not contratou:
             logger.info("Nenhuma contratacao necessaria neste ciclo")
+            registrar_evento("RH: nenhuma contratacao necessaria")
 
 
 modulo_rh = ModuloRH()
