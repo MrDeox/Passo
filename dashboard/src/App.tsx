@@ -1,25 +1,29 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from './components/ui/Button'
 import { Input } from './components/ui/Input'
 import { Card } from './components/ui/Card'
 import { CompanyMap } from './components/CompanyMap'
 
+const API_URL = 'http://localhost:8000'
+
 interface Agent {
-  id: number
   nome: string
   funcao: string
-  salaAtual: string
-  modelo: string
-  estadoEmocional: number
-  historico: string[]
+  modelo_llm: string
+  local_atual: string | null
+  historico_acoes: string[]
+  historico_interacoes: string[]
+  historico_locais: string[]
+  objetivo_atual: string
+  feedback_ceo: string
+  estado_emocional: number
 }
 
 interface Sala {
-  id: number
   nome: string
   descricao: string
   inventario: string[]
-  agentes: number[]
+  agentes_presentes: string[]
 }
 
 interface TimelineItem {
@@ -30,81 +34,58 @@ interface TimelineItem {
   motivo: string
 }
 
-const initialAgents: Agent[] = [
-  {
-    id: 1,
-    nome: 'Alice',
-    funcao: 'Gerente',
-    salaAtual: 'Sala de Reuni\u00e3o',
-    modelo: 'gpt-3.5-turbo',
-    estadoEmocional: 1,
-    historico: ['mover para Sala de Tecnologia -> ok']
-  },
-  {
-    id: 2,
-    nome: 'Bob',
-    funcao: 'Dev',
-    salaAtual: 'Sala de Tecnologia',
-    modelo: 'deepseek-chat',
-    estadoEmocional: 0,
-    historico: []
-  }
-]
-
-const initialSalas: Sala[] = [
-  {
-    id: 1,
-    nome: 'Sala de Reuni\u00e3o',
-    descricao: 'Espa\u00e7o para reuni\u00f5es',
-    inventario: ['mesa', 'projetor'],
-    agentes: [1]
-  },
-  {
-    id: 2,
-    nome: 'Sala de Tecnologia',
-    descricao: 'Lab de dev',
-    inventario: ['computadores'],
-    agentes: [2]
-  }
-]
-
 export default function App() {
-  const [agents, setAgents] = useState<Agent[]>(initialAgents)
-  const [salas, setSalas] = useState<Sala[]>(initialSalas)
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [salas, setSalas] = useState<Sala[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
 
-  const [newAgent, setNewAgent] = useState<Partial<Agent>>({})
+  const [editAgent, setEditAgent] = useState<Partial<Agent> | null>(null)
+  const [editSala, setEditSala] = useState<Partial<Sala> | null>(null)
+
+  const [newAgent, setNewAgent] = useState<{ nome?: string; funcao?: string; modelo?: string; sala?: string }>({})
   const [newSala, setNewSala] = useState<Partial<Sala>>({})
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
 
-  function handleAddAgent() {
-    if (!newAgent.nome || !newAgent.funcao || !newAgent.salaAtual || !newAgent.modelo) return
-    const id = agents.length + 1
-    const agent: Agent = {
-      id,
-      nome: newAgent.nome,
-      funcao: newAgent.funcao,
-      salaAtual: newAgent.salaAtual,
-      modelo: newAgent.modelo,
-      estadoEmocional: 0,
-      historico: []
-    }
-    setAgents([...agents, agent])
-    setNewAgent({})
+  async function loadData() {
+    const ag = await fetch(`${API_URL}/agentes`).then(r => r.json())
+    const sl = await fetch(`${API_URL}/locais`).then(r => r.json())
+    setAgents(ag)
+    setSalas(sl)
   }
 
-  function handleAddSala() {
+  useEffect(() => {
+    loadData()
+  }, [])
+
+  async function handleAddAgent() {
+    if (!newAgent.nome || !newAgent.funcao || !newAgent.sala || !newAgent.modelo) return
+    await fetch(`${API_URL}/agentes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nome: newAgent.nome,
+        funcao: newAgent.funcao,
+        modelo_llm: newAgent.modelo,
+        local: newAgent.sala,
+      }),
+    })
+    setNewAgent({})
+    loadData()
+  }
+
+  async function handleAddSala() {
     if (!newSala.nome) return
-    const id = salas.length + 1
-    const sala: Sala = {
-      id,
-      nome: newSala.nome,
-      descricao: newSala.descricao || '',
-      inventario: [],
-      agentes: []
-    }
-    setSalas([...salas, sala])
+    await fetch(`${API_URL}/locais`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nome: newSala.nome,
+        descricao: newSala.descricao || '',
+        inventario: newSala.inventario || [],
+      }),
+    })
     setNewSala({})
+    loadData()
   }
 
   function handleMoveAgent(id: number, sala: string) {
@@ -127,58 +108,30 @@ export default function App() {
   }
 
   function proximoCiclo() {
+  async function proximoCiclo() {
+    const prev = agents
+    const data = await fetch(`${API_URL}/ciclo/next`, { method: 'POST' }).then(r => r.json())
+    setAgents(data.agentes)
+
     const eventos: TimelineItem[] = []
-    setAgents(prev => {
-      return prev.map(a => {
-        const rand = Math.random()
-        let novo = { ...a }
-        if (rand < 0.25 && salas.length > 1) {
-          const destinos = salas.map(s => s.nome).filter(n => n !== a.salaAtual)
-          const destino = destinos[Math.floor(Math.random() * destinos.length)]
-          novo.salaAtual = destino
-          novo.historico = [...novo.historico, `mover para ${destino} -> ok`]
-          eventos.push({
-            id: Date.now() + eventos.length,
-            agente: a.nome,
-            acao: 'Mudança de sala',
-            sala: destino,
-            motivo: `Decidiu ir para ${destino}`,
-          })
-        } else if (rand < 0.5 && prev.length > 1) {
-          const outros = prev.filter(b => b.id !== a.id)
-          const dest = outros[Math.floor(Math.random() * outros.length)]
-          novo.historico = [...novo.historico, `mensagem para ${dest.nome}`]
-          eventos.push({
-            id: Date.now() + eventos.length,
-            agente: a.nome,
-            acao: 'Mensagem',
-            sala: a.salaAtual,
-            motivo: `Enviou mensagem para ${dest.nome}`,
-          })
-        } else if (rand < 0.75) {
-          novo.historico = [...novo.historico, 'ficar -> ok']
-          eventos.push({
-            id: Date.now() + eventos.length,
-            agente: a.nome,
-            acao: 'Decisão',
-            sala: a.salaAtual,
-            motivo: 'Decidiu permanecer na sala',
-          })
-        } else {
-          const novoEmo = a.estadoEmocional + (Math.random() > 0.5 ? 1 : -1)
-          novo.estadoEmocional = novoEmo
-          eventos.push({
-            id: Date.now() + eventos.length,
-            agente: a.nome,
-            acao: 'Emoção',
-            sala: a.salaAtual,
-            motivo: `Mudou para ${novoEmo}`,
-          })
-        }
-        return novo
-      })
+    data.agentes.forEach((a: Agent) => {
+      const anterior = prev.find(p => p.nome === a.nome)
+      if (!anterior) return
+      const ultima = a.historico_acoes[a.historico_acoes.length - 1]
+      const anteriorUltima = anterior.historico_acoes[anterior.historico_acoes.length - 1]
+      if (ultima && ultima !== anteriorUltima) {
+        eventos.push({
+          id: Date.now() + eventos.length,
+          agente: a.nome,
+          acao: ultima,
+          sala: a.local_atual || '',
+          motivo: ultima,
+        })
+      }
     })
-    setTimeline(prev => [...eventos, ...prev].slice(0, 50))
+    if (eventos.length) {
+      setTimeline(prevTl => [...eventos, ...prevTl].slice(0, 50))
+    }
   }
 
   return (
@@ -190,7 +143,7 @@ export default function App() {
           <h2 className="text-xl font-semibold">Novo Agente</h2>
           <Input placeholder="Nome" value={newAgent.nome || ''} onChange={e => setNewAgent({ ...newAgent, nome: e.target.value })} />
           <Input placeholder="Fun\u00e7\u00e3o" value={newAgent.funcao || ''} onChange={e => setNewAgent({ ...newAgent, funcao: e.target.value })} />
-          <Input placeholder="Sala atual" value={newAgent.salaAtual || ''} onChange={e => setNewAgent({ ...newAgent, salaAtual: e.target.value })} />
+          <Input placeholder="Sala atual" value={newAgent.sala || ''} onChange={e => setNewAgent({ ...newAgent, sala: e.target.value })} />
           <Input placeholder="Modelo" value={newAgent.modelo || ''} onChange={e => setNewAgent({ ...newAgent, modelo: e.target.value })} />
           <Button onClick={handleAddAgent}>Adicionar</Button>
         </Card>
@@ -227,12 +180,12 @@ export default function App() {
             </thead>
             <tbody>
               {agents.map(a => (
-                <tr key={a.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedAgent(a)}>
+                <tr key={a.nome} className="hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedAgent(a)}>
                   <td className="border-b p-2">{a.nome}</td>
                   <td className="border-b p-2">{a.funcao}</td>
-                  <td className="border-b p-2">{a.salaAtual}</td>
-                  <td className="border-b p-2">{a.modelo}</td>
-                  <td className="border-b p-2">{a.estadoEmocional}</td>
+                  <td className="border-b p-2">{a.local_atual}</td>
+                  <td className="border-b p-2">{a.modelo_llm}</td>
+                  <td className="border-b p-2">{a.estado_emocional}</td>
                 </tr>
               ))}
             </tbody>
@@ -242,11 +195,25 @@ export default function App() {
         <Card className="flex-1">
           <h2 className="text-xl font-semibold mb-2">Salas</h2>
           {salas.map(s => (
-            <div key={s.id} className="mb-4">
-              <h3 className="font-medium">{s.nome}</h3>
-              <p className="text-sm text-gray-600">{s.descricao}</p>
-              <p className="text-sm">Invent\u00e1rio: {s.inventario.join(', ') || 'vazio'}</p>
-              <p className="text-sm">Agentes: {agents.filter(a => a.salaAtual === s.nome).map(a => a.nome).join(', ') || 'nenhum'}</p>
+            <div key={s.nome} className="mb-4">
+              {editSala && editSala.nome === s.nome ? (
+                <div className="space-y-2">
+                  <Input value={editSala.descricao || ''} onChange={e => setEditSala({ ...editSala!, descricao: e.target.value })} />
+                  <Input value={(editSala.inventario || []).join(', ')} onChange={e => setEditSala({ ...editSala!, inventario: e.target.value.split(',').map(v => v.trim()).filter(Boolean) })} />
+                  <div className="space-x-2">
+                    <Button onClick={async () => { await fetch(`${API_URL}/locais/${editSala!.nome}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descricao: editSala!.descricao, inventario: editSala!.inventario }) }); setEditSala(null); loadData(); }}>Salvar</Button>
+                    <Button onClick={() => setEditSala(null)}>Cancelar</Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h3 className="font-medium">{s.nome}</h3>
+                  <p className="text-sm text-gray-600">{s.descricao}</p>
+                  <p className="text-sm">Invent\u00e1rio: {s.inventario.join(', ') || 'vazio'}</p>
+                  <p className="text-sm">Agentes: {agents.filter(a => a.local_atual === s.nome).map(a => a.nome).join(', ') || 'nenhum'}</p>
+                  <Button className="mt-1" onClick={() => setEditSala({ ...s })}>Editar</Button>
+                </>
+              )}
             </div>
           ))}
         </Card>
@@ -269,11 +236,34 @@ export default function App() {
       </div>
 
       {selectedAgent && (
-        <Card className="fixed inset-0 m-auto w-1/2 h-1/2 overflow-auto z-10">
-          <Button className="float-right" onClick={() => setSelectedAgent(null)}>Fechar</Button>
+        <Card className="fixed inset-0 m-auto w-1/2 h-1/2 overflow-auto z-10 space-y-2">
+          <Button className="float-right" onClick={() => { setSelectedAgent(null); setEditAgent(null) }}>Fechar</Button>
           <h2 className="text-xl font-semibold mb-2">Hist\u00f3rico de {selectedAgent.nome}</h2>
+          <div className="space-y-2">
+            <Input placeholder="Função" value={editAgent?.funcao ?? selectedAgent.funcao} onChange={e => setEditAgent({ ...editAgent, funcao: e.target.value })} />
+            <Input placeholder="Modelo" value={editAgent?.modelo_llm ?? selectedAgent.modelo_llm} onChange={e => setEditAgent({ ...editAgent, modelo_llm: e.target.value })} />
+            <Input placeholder="Sala" value={(editAgent?.local_atual ?? selectedAgent.local_atual) || ''} onChange={e => setEditAgent({ ...editAgent, local_atual: e.target.value })} />
+            <Input placeholder="Objetivo" value={editAgent?.objetivo_atual ?? selectedAgent.objetivo_atual} onChange={e => setEditAgent({ ...editAgent, objetivo_atual: e.target.value })} />
+            <Input placeholder="Feedback" value={editAgent?.feedback_ceo ?? selectedAgent.feedback_ceo} onChange={e => setEditAgent({ ...editAgent, feedback_ceo: e.target.value })} />
+            <Button onClick={async () => {
+              await fetch(`${API_URL}/agentes/${selectedAgent.nome}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  funcao: editAgent?.funcao,
+                  modelo_llm: editAgent?.modelo_llm,
+                  local: editAgent?.local_atual,
+                  objetivo: editAgent?.objetivo_atual,
+                  feedback_ceo: editAgent?.feedback_ceo,
+                })
+              })
+              setEditAgent(null)
+              setSelectedAgent(null)
+              loadData()
+            }}>Salvar</Button>
+          </div>
           <ul className="list-disc pl-6 space-y-1">
-            {selectedAgent.historico.map((h, i) => <li key={i}>{h}</li>)}
+            {selectedAgent.historico_acoes.map((h, i) => <li key={i}>{h}</li>)}
           </ul>
         </Card>
       )}
