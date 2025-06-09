@@ -2,11 +2,25 @@ import logging
 import os
 from typing import List, Optional, Tuple
 from pathlib import Path
-import os
 import requests
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+ROOT = Path(__file__).parent
+KEY_FILE = ROOT / ".openrouter_key"
+
+
+def obter_api_key() -> str:
+    """Retorna a chave da OpenRouter de variavel de ambiente ou arquivo."""
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key.strip()
+    if KEY_FILE.exists():
+        key = KEY_FILE.read_text().strip()
+        os.environ["OPENROUTER_API_KEY"] = key
+        return key
+    raise RuntimeError("OPENROUTER_API_KEY nao definido")
 
 from empresa_digital import (
     Agente,
@@ -163,9 +177,7 @@ class ModeloEscolhido(BaseModel):
 
 def _buscar_modelos_gratis() -> List[str]:
     """Retorna todos os modelos gratuitos disponiveis na OpenRouter."""
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        raise RuntimeError("OPENROUTER_API_KEY nao definido")
+    key = obter_api_key()
 
     url = "https://openrouter.ai/api/v1/models"
     resp = requests.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=10)
