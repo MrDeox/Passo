@@ -199,3 +199,32 @@ Durante o carregamento o dashboard exibe a mensagem **"Carregando/Iniciando a
 empresa..."**. Assim que o backend responde, a interface mostra as salas,
 agentes e um painel de eventos em tempo real demonstrando o raciocínio e as
 decisões de cada agente.
+
+## Testes Automatizados
+
+Uma bateria de testes em `pytest` valida as partes isoladas do sistema e o comportamento integrado.
+
+Para executar todos os testes:
+
+```bash
+# instalar dependências do backend e o pytest
+pip install -r requirements.txt pytest
+
+# rodar a suíte (é importante incluir o diretório raiz no PYTHONPATH)
+PYTHONPATH=. pytest -q
+```
+
+O relatório exibirá quantos testes foram executados e possíveis falhas. Os testes
+estão organizados em:
+
+- `tests/test_core.py` e `tests/test_llm.py` – verificações unitárias das funções
+  principais e da heurística de seleção de modelos.
+- `tests/test_integration.py`, `tests/test_simulation.py` e `tests/test_rh_auto.py`
+  – integração entre módulos como RH, ciclo criativo e cálculo de lucro.
+- `tests/test_end_to_end.py` e `tests/test_frontend_api.py` – simulam a
+  inicialização completa e ciclos via API, garantindo atualização da interface.
+- `tests/test_resilience.py` – cenários de erro e validação de mensagens.
+
+Todos devem passar indicando que a empresa digital consegue se comportar de forma
+autônoma e resiliente.
+
