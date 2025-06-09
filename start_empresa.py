@@ -56,10 +56,12 @@ def main() -> None:
     install_dependencies()
 
     backend_cmd = [sys.executable, "-m", "uvicorn", "api:app", "--reload", "--port", BACKEND_PORT]
-    backend = subprocess.Popen(backend_cmd)
+    backend_log = open(ROOT / "backend.log", "w")
+    backend = subprocess.Popen(backend_cmd, stdout=backend_log, stderr=subprocess.STDOUT)
     if not wait_backend(BACKEND_PORT):
         print("Backend nao respondeu a tempo.")
         backend.terminate()
+        backend_log.close()
         return
     print(f"Backend rodando em http://localhost:{BACKEND_PORT}")
     show_status(BACKEND_PORT)
@@ -70,14 +72,19 @@ def main() -> None:
         print("Falha ao disparar ciclo inicial:", exc)
 
     frontend_cmd = ["npm", "run", "dev", "--", "--port", FRONTEND_PORT]
-    frontend = subprocess.Popen(frontend_cmd, cwd=ROOT / "dashboard")
+    frontend_log = open(ROOT / "frontend.log", "w")
+    frontend = subprocess.Popen(frontend_cmd, cwd=ROOT / "dashboard", stdout=frontend_log, stderr=subprocess.STDOUT)
     print(f"Frontend acessivel em http://localhost:{FRONTEND_PORT}")
 
     try:
         while True:
-            time.sleep(1)
-            if backend.poll() is not None or frontend.poll() is not None:
+            if backend.poll() is not None:
+                print("Backend finalizado inesperadamente. Veja backend.log")
                 break
+            if frontend.poll() is not None:
+                print("Frontend finalizado inesperadamente. Veja frontend.log")
+                break
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
@@ -85,6 +92,8 @@ def main() -> None:
         backend.terminate()
         frontend.wait()
         backend.wait()
+        backend_log.close()
+        frontend_log.close()
 
 
 if __name__ == "__main__":
