@@ -42,7 +42,10 @@ export default function App() {
   const [editAgent, setEditAgent] = useState<Partial<Agent> | null>(null)
   const [editSala, setEditSala] = useState<Partial<Sala> | null>(null)
 
-  const [newAgent, setNewAgent] = useState<{ nome?: string; funcao?: string; modelo?: string; sala?: string }>({})
+  const [newAgent, setNewAgent] = useState<{ nome?: string; funcao?: string; sala?: string }>({})
+  const [modelosGratis, setModelosGratis] = useState<string[]>([])
+  const [modeloSugerido, setModeloSugerido] = useState<string>('')
+  const [raciocinioModelo, setRaciocinioModelo] = useState<string>('')
   const [newSala, setNewSala] = useState<Partial<Sala>>({})
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
   const [saldo, setSaldo] = useState<number>(0)
@@ -55,23 +58,53 @@ export default function App() {
     setSalas(sl)
   }
 
+  async function loadModelos() {
+    const lista = await fetch(`${API_URL}/modelos-livres`).then(r => r.json())
+    setModelosGratis(lista)
+  }
+
   useEffect(() => {
     loadData()
+    loadModelos()
   }, [])
 
+  useEffect(() => {
+    if (newAgent.nome && newAgent.funcao && newAgent.sala) {
+      fetch(`${API_URL}/agentes/escolher-modelo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: newAgent.nome,
+          funcao: newAgent.funcao,
+          sala: newAgent.sala,
+        })
+      })
+        .then(r => r.json())
+        .then(d => {
+          setModeloSugerido(d.modelo)
+          setRaciocinioModelo(d.raciocinio)
+        })
+    } else {
+      setModeloSugerido('')
+      setRaciocinioModelo('')
+    }
+  }, [newAgent.nome, newAgent.funcao, newAgent.sala])
+
   async function handleAddAgent() {
-    if (!newAgent.nome || !newAgent.funcao || !newAgent.sala || !newAgent.modelo) return
+    if (!newAgent.nome || !newAgent.funcao || !newAgent.sala || !modeloSugerido) return
     await fetch(`${API_URL}/agentes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         nome: newAgent.nome,
         funcao: newAgent.funcao,
-        modelo_llm: newAgent.modelo,
+        modelo_llm: modeloSugerido,
         local: newAgent.sala,
       }),
     })
     setNewAgent({})
+    setModeloSugerido('')
+    setRaciocinioModelo('')
     loadData()
   }
 
@@ -147,7 +180,13 @@ export default function App() {
           <Input placeholder="Nome" value={newAgent.nome || ''} onChange={e => setNewAgent({ ...newAgent, nome: e.target.value })} />
           <Input placeholder="Fun\u00e7\u00e3o" value={newAgent.funcao || ''} onChange={e => setNewAgent({ ...newAgent, funcao: e.target.value })} />
           <Input placeholder="Sala atual" value={newAgent.sala || ''} onChange={e => setNewAgent({ ...newAgent, sala: e.target.value })} />
-          <Input placeholder="Modelo" value={newAgent.modelo || ''} onChange={e => setNewAgent({ ...newAgent, modelo: e.target.value })} />
+          <p className="text-sm">Modelo sugerido: {modeloSugerido || '...'}</p>
+          {raciocinioModelo && (
+            <p className="text-xs text-gray-500">{raciocinioModelo}</p>
+          )}
+          {modelosGratis.length > 0 && (
+            <p className="text-xs text-gray-500">Modelos dispon\u00edveis: {modelosGratis.join(', ')}</p>
+          )}
           <Button onClick={handleAddAgent}>Adicionar</Button>
         </Card>
 
