@@ -1,3 +1,9 @@
+"""Automatic hiring module for the digital company.
+
+Provides the :class:`ModuloRH` used to create and allocate new agents when
+there is available balance and unmet demand or pending tasks.
+"""
+
 import logging
 from typing import Dict
 
