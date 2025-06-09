@@ -237,3 +237,22 @@ estão organizados em:
 Todos devem passar indicando que a empresa digital consegue se comportar de forma
 autônoma e resiliente.
 
+## CLI para automação
+
+Um utilitário de linha de comando está disponível no arquivo `cli.py`. Ele permite interagir com o backend sem a interface web, desde que o servidor esteja rodando.
+
+Exemplos:
+
+```bash
+# listar agentes
+python cli.py agentes
+
+# executar um ciclo
+python cli.py ciclo
+
+# obter os modelos gratuitos da OpenRouter
+python cli.py modelos
+```
+
+O utilitário lê a variável `OPENROUTER_API_KEY` ou o arquivo `.openrouter_key` para acessar endpoints que consultam a OpenRouter.
+
