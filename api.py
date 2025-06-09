@@ -19,6 +19,7 @@ from empresa_digital import (
     gerar_prompt_decisao,
     enviar_para_llm,
     executar_resposta,
+    inicializar_automaticamente,
 )
 from rh import modulo_rh
 from ciclo_criativo import executar_ciclo_criativo, historico_ideias
@@ -28,6 +29,12 @@ logging.basicConfig(level=logging.INFO)
 
 # Instância principal da aplicação FastAPI
 app = FastAPI(title="Empresa Digital API")
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    """Inicializa a empresa de forma totalmente autônoma."""
+    inicializar_automaticamente()
 
 
 def agente_to_dict(ag: Agente) -> dict:

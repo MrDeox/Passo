@@ -11,10 +11,11 @@ Para executar o exemplo de uso basta rodar:
 python empresa_digital.py
 ```
 
-O script cria dois locais, três agentes e demonstra a movimentação de um
-agente entre salas. Ele também exibe prompts dinâmicos contendo informações do
-agente, salva o estado em arquivos JSON e recarrega os dados para provar a
-persistência.
+Ao ser executado o sistema **cria tudo sozinho**: salas, agentes, objetivos
+iniciais e tarefas são definidos automaticamente utilizando heurísticas que
+substituem o raciocínio de uma LLM. Nenhum input manual é necessário. O script
+apenas imprime as decisões tomadas e executa alguns ciclos para demonstrar a
+autonomia.
 
 Cada agente mantém um histórico adaptativo contendo:
 
@@ -158,7 +159,7 @@ Os principais endpoints retornam dados em JSON:
 
 ## Dashboard React
 
-O diretório `dashboard` contém uma aplicação React que permite visualizar os agentes e salas de maneira interativa. Para rodar em modo de desenvolvimento instale as dependências e execute:
+O diretório `dashboard` contém uma aplicação React que **apenas exibe** o que está acontecendo na empresa. Não existem mais formulários de criação ou edição manual. Para rodar em modo de desenvolvimento instale as dependências e execute:
 
 ```bash
 cd dashboard
@@ -166,4 +167,4 @@ npm install
 npm run dev
 ```
 
-Durante a execução é possível movimentar agentes entre salas arrastando seus cards no mapa da empresa. Cada ciclo da simulação também atualiza as posições automaticamente.
+O mapa e as tabelas são atualizados a cada ciclo disparado pelo botão "Próximo ciclo" e apenas refletem as decisões automáticas do backend.

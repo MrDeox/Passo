@@ -62,8 +62,8 @@ Logs registram `ideia -> validação -> protótipo -> resultado`, influenciando 
 - **empresa_digital.py**: define classes `Agente` e `Local`, funções de criação/movimentação, gera prompts, executa respostas simuladas e calcula lucro por ciclo.
 - **rh.py**: implementa `ModuloRH` responsável por contratar agentes de forma autônoma, analisando saldo e tarefas.
 - **ciclo_criativo.py**: gerencia ideias, validações e protótipos, armazenando histórico e preferências de temas.
-- **api.py**: expõe a API REST com endpoints para agentes, salas e avanço de ciclos. Chama o RH e o ciclo criativo antes de executar ações de cada agente.
-- **dashboard/**: aplicação React (Vite + Tailwind) que consome a API, mostra mapa da empresa, edita agentes e salas e exibe o histórico de lucro.
+- **api.py**: expõe a API REST e inicializa automaticamente salas e agentes. Chama o RH e o ciclo criativo antes de executar ações de cada agente.
+- **dashboard/**: aplicação React (Vite + Tailwind) apenas para visualização em tempo real do que a empresa está fazendo.
 
 ## Como Rodar o Projeto
 
@@ -98,12 +98,9 @@ npm install
 npm run dev
 ```
 
-A interface abrirá em `http://localhost:5173`. Ela exibe as salas e agentes em tempo real. Utilize o botão **Próximo Ciclo** para simular novas iterações e visualizar o impacto no lucro.
+A interface abrirá em `http://localhost:5173`. Ela apenas exibe as salas, agentes e o histórico de saldo. Use **Próximo Ciclo** para acompanhar as decisões automáticas.
 
-#### Sele\u00e7\u00e3o autom\u00e1tica de modelo
-
-Ao abrir o formul\u00e1rio de cria\u00e7\u00e3o de agentes o dashboard requisita ao backend a lista de modelos gratuitos da OpenRouter.\
-Ap\u00f3s preencher nome, fun\u00e7\u00e3o e sala o frontend consulta o endpoint `/agentes/escolher-modelo`, que retorna o modelo mais adequado e o motivo da escolha. Esse valor \u00e9 exibido em tela e utilizado na cria\u00e7\u00e3o do agente.
+O modelo de linguagem de cada agente é definido internamente pelo backend, sem intervenção do usuário.
 
 ## Como Contribuir e Expandir
 
