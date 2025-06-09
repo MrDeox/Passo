@@ -256,9 +256,11 @@ autônoma e resiliente.
 
 ## CLI para automação
 
-Um utilitário de linha de comando está disponível no arquivo `cli.py`. Ele permite interagir com o backend sem a interface web, desde que o servidor esteja rodando.
+Um utilitário de linha de comando está disponível no arquivo `cli.py`. Ele
+permite interagir com o backend sem a interface web, desde que o servidor esteja
+rodando.
 
-Exemplos:
+Exemplos básicos:
 
 ```bash
 # listar agentes
@@ -271,5 +273,46 @@ python cli.py ciclo
 python cli.py modelos
 ```
 
-O utilitário lê a variável `OPENROUTER_API_KEY` ou o arquivo `.openrouter_key` para acessar endpoints que consultam a OpenRouter.
+O utilitário lê a variável `OPENROUTER_API_KEY` ou o arquivo `.openrouter_key`
+para acessar endpoints que consultam a OpenRouter.
+
+### Operando tudo via CLI
+
+Para rodar a empresa digital apenas pela linha de comando:
+
+1. Garanta que as dependências do backend estejam instaladas (`pip install -r
+   requirements.txt`).
+2. Defina `OPENROUTER_API_KEY` com uma chave válida (ou crie o arquivo
+   `.openrouter_key`). Exemplo:
+
+   ```bash
+   export OPENROUTER_API_KEY=sk-my-key
+   ```
+3. Inicie o backend:
+
+   ```bash
+   python start_backend.py
+   ```
+
+   O script imprime onde os dados são salvos e, quando o servidor está pronto,
+   exibe quais agentes e salas foram criados automaticamente.
+
+4. Em outro terminal, utilize `cli.py` para consultar e controlar o sistema:
+
+   ```bash
+   # listar agentes existentes
+   python cli.py agentes
+
+   # listar salas disponíveis
+   python cli.py locais
+
+   # executar um ciclo completo (RH, ideias, lucro)
+   python cli.py ciclo
+   ```
+
+   A execução do ciclo retorna o saldo atualizado e os eventos do turno,
+   possibilitando monitorar a evolução sem qualquer interface gráfica.
+
+Esses comandos permitem inicializar a empresa, verificar o estado corrente e
+rodar novos ciclos totalmente via linha de comando.
 
