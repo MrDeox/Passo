@@ -296,6 +296,12 @@ async def listar_eventos():
     return list(historico_eventos)
 
 
+@app.get("/lucro")
+async def obter_lucro():
+    """Expõe o saldo acumulado e o histórico de lucro."""
+    return {"saldo": saldo, "historico_saldo": historico_saldo}
+
+
 # ---------------------------- Controle da simulação ---------------------------
 @app.post("/ciclo/next")
 async def proximo_ciclo():
