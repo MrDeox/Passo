@@ -104,6 +104,34 @@ Exemplo: se o saldo estiver baixo, o RH não abrirá vagas extras mesmo que uma
 sala esteja vazia. Já com saldo alto e tarefas pendentes, novos agentes são
 criados para acelerar a entrega de MVPs e gerar mais receita.
 
+## Ciclo criativo automatizado
+
+O módulo `ciclo_criativo.py` adiciona um fluxo de ideação e validação em cada
+`/ciclo/next`. Agentes com função **Ideacao** propõem produtos ou campanhas e
+justificam o potencial de lucro. Em seguida, agentes com função **Validador**
+avaliam riscos, recursos disponíveis e experiências anteriores. Se aprovadas,
+as ideias viram tarefas para executores e podem gerar contratações automáticas
+pelo RH.
+
+Cada passagem registra no log a sequência `ideia -> validação -> prototipagem -> resultado`.
+Ideias lucrativas aumentam a prioridade de temas semelhantes nos ciclos
+seguintes; prejuízos reduzem essa preferência.
+
+Exemplo de log de sucesso:
+
+```text
+INFO:Ideia proposta: Produto IA proposto por Alice
+INFO:Validacao de Produto IA proposto por Alice por Bob: aprovada
+INFO:Prototipo de Produto IA proposto por Alice resultou em 30.00
+```
+
+Exemplo de log de fracasso:
+
+```text
+INFO:Ideia proposta: Produto IA proposto por Alice
+INFO:Validacao de Produto IA proposto por Alice por Bob: reprovada
+```
+
 ## API REST
 
 A aplicação possui uma API REST construída com **FastAPI** disponível no arquivo `api.py`.
