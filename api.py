@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -20,6 +21,9 @@ from empresa_digital import (
 )
 from rh import modulo_rh
 from ciclo_criativo import executar_ciclo_criativo, historico_ideias
+
+# Configuração de logging global
+logging.basicConfig(level=logging.INFO)
 
 # Instância principal da aplicação FastAPI
 app = FastAPI(title="Empresa Digital API")

@@ -1,8 +1,6 @@
 import logging
 from typing import Dict
 
-logging.basicConfig(level=logging.INFO)
-
 from empresa_digital import (
     agentes,
     locais,
