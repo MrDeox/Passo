@@ -183,7 +183,8 @@ python start_empresa.py
 Etapas realizadas pelo script:
 
 1. Caso não exista o arquivo `.openrouter_key`, pede a sua API Key e salva
-   localmente.
+   localmente. Esse arquivo armazena a chave e deve permanecer privado (já está
+   listado no `.gitignore`).
 2. Instala os pacotes Python listados em `requirements.txt`.
 3. Garante que as dependências do dashboard estejam instaladas (`npm install`).
 4. Inicia o backend na porta 8000 e aguarda ele ficar disponível.

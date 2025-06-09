@@ -193,3 +193,4 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 dashboard/node_modules/
+.openrouter_key
