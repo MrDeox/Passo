@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List, Optional, Tuple
 import requests
 
@@ -126,9 +127,13 @@ class ModeloEscolhido(BaseModel):
 
 
 def _buscar_modelos_gratis() -> List[str]:
-    """Retorna todos os modelos gratuitos dispon\u00edveis na OpenRouter."""
+    """Retorna todos os modelos gratuitos disponiveis na OpenRouter."""
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if not key:
+        raise RuntimeError("OPENROUTER_API_KEY nao definido")
+
     url = "https://openrouter.ai/api/v1/models"
-    resp = requests.get(url, timeout=10)
+    resp = requests.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=10)
     resp.raise_for_status()
     data = resp.json()
     return [m["id"] for m in data.get("data", []) if ":free" in m.get("id", "")]
