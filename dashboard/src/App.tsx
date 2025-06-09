@@ -45,6 +45,8 @@ export default function App() {
   const [newAgent, setNewAgent] = useState<{ nome?: string; funcao?: string; modelo?: string; sala?: string }>({})
   const [newSala, setNewSala] = useState<Partial<Sala>>({})
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
+  const [saldo, setSaldo] = useState<number>(0)
+  const [historicoSaldo, setHistoricoSaldo] = useState<number[]>([])
 
   async function loadData() {
     const ag = await fetch(`${API_URL}/agentes`).then(r => r.json())
@@ -107,11 +109,12 @@ export default function App() {
     }
   }
 
-  function proximoCiclo() {
   async function proximoCiclo() {
     const prev = agents
     const data = await fetch(`${API_URL}/ciclo/next`, { method: 'POST' }).then(r => r.json())
     setAgents(data.agentes)
+    setSaldo(data.saldo)
+    setHistoricoSaldo(data.historico_saldo)
 
     const eventos: TimelineItem[] = []
     data.agentes.forEach((a: Agent) => {
@@ -230,6 +233,15 @@ export default function App() {
                 </p>
                 <p className="text-xs text-gray-600">{ev.motivo}</p>
               </div>
+            ))}
+          </div>
+        </Card>
+        <Card className="flex-1">
+          <h2 className="text-xl font-semibold mb-2">Lucro</h2>
+          <p className="text-sm">Saldo atual: {saldo.toFixed(2)}</p>
+          <div className="mt-2 space-y-1 max-h-96 overflow-auto text-xs">
+            {historicoSaldo.map((v, i) => (
+              <div key={i}>{i + 1}: {v.toFixed(2)}</div>
             ))}
           </div>
         </Card>

@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 import json
 
+# ---------------------------- Lucro da empresa ----------------------------
+# Saldo acumulado da empresa ao longo da simulação. Cada ciclo soma receitas e
+# subtrai custos fixos. O histórico é usado pelo dashboard para gerar gráficos.
+saldo: float = 0.0
+historico_saldo: List[float] = []
+
 # Lista global de tarefas pendentes que podem ser atribuídas a novos agentes
 tarefas_pendentes: List[str] = []
 
@@ -228,6 +234,22 @@ def carregar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
         ag.estado_emocional = info.get("estado_emocional", 0)
 
 
+def calcular_lucro_ciclo() -> dict:
+    """Atualiza o saldo global de acordo com receitas e custos do ciclo."""
+    global saldo
+    receita = 0.0
+    for ag in agentes.values():
+        if ag.historico_acoes and ag.historico_acoes[-1].endswith("ok"):
+            receita += 10.0
+
+    custos_salario = len(agentes) * 5.0
+    custos_recursos = sum(len(ag.local_atual.inventario) for ag in agentes.values() if ag.local_atual)
+    custos = custos_salario + custos_recursos
+    saldo += receita - custos
+    historico_saldo.append(saldo)
+    return {"saldo": saldo, "receita": receita, "custos": custos}
+
+
 def gerar_prompt_dinamico(agente: Agente) -> str:
     """Gera uma descrição textual da situação atual de um agente."""
 
@@ -263,6 +285,7 @@ def gerar_prompt_dinamico(agente: Agente) -> str:
             + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
         ),
         f"Objetivo atual: {agente.objetivo_atual or 'Nenhum'}",
+        "Objetivo principal: maximizar o lucro da empresa",
         f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
         f"Estado emocional: {agente.estado_emocional}",
     ]
@@ -313,12 +336,14 @@ def gerar_prompt_decisao(agente: Agente) -> str:
                     + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
                 ),
                 f"Objetivo: {agente.objetivo_atual or 'Nenhum'}",
+                "Objetivo principal: maximizar o lucro da empresa",
                 f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
                 f"Estado emocional: {agente.estado_emocional}",
             ]
         )
 
     instrucoes = (
+        "Seu objetivo final é maximizar o lucro da empresa.\n"
         "Escolha UMA das ações a seguir e responda apenas em JSON:\n"
         "1. 'ficar' - permanecer no local atual.\n"
         "2. 'mover' - ir para outro local. Use o campo 'local' com o destino.\n"
