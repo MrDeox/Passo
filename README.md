@@ -212,6 +212,13 @@ Para executar todos os testes:
 # instalar dependências do backend e o pytest
 pip install -r requirements.txt pytest
 
+# defina a chave da OpenRouter
+export OPENROUTER_API_KEY=XXXX   # ou crie um arquivo .env com essa variável
+
+# exemplo:
+# cp .env.example .env
+# edite e depois execute `source .env`
+
 # rodar a suíte (é importante incluir o diretório raiz no PYTHONPATH)
 PYTHONPATH=. pytest -q
 ```

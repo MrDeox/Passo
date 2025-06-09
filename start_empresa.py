@@ -16,6 +16,9 @@ DATA_LOCAIS = ROOT / "locais.json"
 
 def ensure_api_key() -> None:
     """Solicita e armazena a API Key da OpenRouter na primeira execucao."""
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return
     if KEY_FILE.exists():
         key = KEY_FILE.read_text().strip()
     else:
