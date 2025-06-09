@@ -9,8 +9,9 @@ complexas no futuro.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import json
+import logging
 
 # ---------------------------- Lucro da empresa ----------------------------
 # Saldo acumulado da empresa ao longo da simulação. Cada ciclo soma receitas e
@@ -89,6 +90,83 @@ class Agente:
         self.estado_emocional += 1 if sucesso else -1
         # Limita o valor entre -5 e 5 para evitar exageros.
         self.estado_emocional = max(-5, min(5, self.estado_emocional))
+
+
+# ---------------------------------------------------------------------------
+# Lógica autônoma de inicialização e escolha de modelos
+# ---------------------------------------------------------------------------
+
+def selecionar_modelo(funcao: str) -> Tuple[str, str]:
+    """Define automaticamente o modelo de linguagem ideal.
+
+    Uma heurística simples substitui o raciocínio de uma LLM real. Retorna o
+    modelo escolhido e a justificativa para registro em log.
+    """
+
+    base = ["gpt-3.5-turbo", "deepseek-chat", "phi-4:free", "llama3-8b:free"]
+    f = funcao.lower()
+    if any(t in f for t in ["dev", "engenheiro", "developer"]):
+        return "deepseek-chat", "Função técnica; modelo otimizado para código."
+    if any(t in f for t in ["ceo", "diretor", "gerente"]):
+        return "phi-4:free", "Função gerencial; modelo estratégico."
+    return base[0], "Função genérica; modelo padrão adotado."
+
+
+def _decidir_salas_iniciais() -> List[Tuple[str, str, List[str]]]:
+    """Simula via LLM quais salas criar inicialmente."""
+
+    return [
+        ("Planejamento", "Sala para estratégias iniciais", ["quadro", "internet"]),
+        (
+            "Laboratorio IA",
+            "Espaço para experimentos de IA",
+            ["computadores", "gpu"],
+        ),
+    ]
+
+
+def _decidir_agentes_iniciais() -> List[Tuple[str, str, str, str, str]]:
+    """Define quais agentes iniciarão a empresa."""
+
+    configuracoes = [
+        ("Clara", "CEO", "Planejamento", "Definir metas iniciais"),
+        ("Rafael", "Ideacao", "Laboratorio IA", "Gerar ideias de produtos"),
+        ("Marta", "Validador", "Planejamento", "Avaliar viabilidade"),
+    ]
+    agentes_cfg = []
+    for nome, funcao, sala, objetivo in configuracoes:
+        modelo, motivo = selecionar_modelo(funcao)
+        logging.info(
+            "Modelo %s escolhido para %s (%s) - %s",
+            modelo,
+            nome,
+            funcao,
+            motivo,
+        )
+        agentes_cfg.append((nome, funcao, modelo, sala, objetivo))
+    return agentes_cfg
+
+
+def inicializar_automaticamente() -> None:
+    """Cria toda a estrutura inicial sem inputs humanos."""
+
+    if agentes or locais:
+        logging.info("Empresa já inicializada")
+        return
+
+    logging.info("Inicialização autônoma da empresa")
+    for nome, desc, inv in _decidir_salas_iniciais():
+        criar_local(nome, desc, inv)
+        logging.info("Sala criada: %s - %s", nome, desc)
+
+    for nome, funcao, modelo, sala, objetivo in _decidir_agentes_iniciais():
+        criar_agente(nome, funcao, modelo, sala, objetivo)
+        logging.info(
+            "Agente criado: %s em %s como %s", nome, sala, funcao
+        )
+
+    tarefas_pendentes.append("Planejar estratégia de lançamento")
+    logging.info("Tarefa inicial registrada: Planejar estratégia de lançamento")
 
 
 # ---------------------------------------------------------------------------
@@ -419,68 +497,22 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Criar dois locais
-    sala_reuniao = criar_local(
-        "Sala de Reunião",
-        "Espaço para realizar reuniões",
-        ["mesa", "projetor"],
-    )
-    sala_tecnologia = criar_local(
-        "Sala de Tecnologia",
-        "Laboratório de desenvolvimento",
-        ["computadores", "ferramentas de rede"],
-    )
+    """Demonstra a inicialização e alguns ciclos totalmente autônomos."""
 
-    # Criar três agentes
-    alice = criar_agente(
-        "Alice",
-        "Gerente",
-        "gpt-3.5-turbo",
-        "Sala de Reunião",
-        objetivo="Planejar projeto X",
-    )
-    bob = criar_agente(
-        "Bob",
-        "Desenvolvedor",
-        "deepseek-chat",
-        "Sala de Tecnologia",
-        objetivo="Implementar tarefa Y",
-    )
-    carol = criar_agente(
-        "Carol",
-        "Analista",
-        "gpt-3.5-turbo",
-        "Sala de Reunião",
-        objetivo="Coletar requisitos",
-    )
-
-    # Mover um agente entre salas
-    mover_agente("Alice", "Sala de Tecnologia")
-
-    # Exibir situação atual com prompts dinâmicos
-    for agente in agentes.values():
-        print("\n" + gerar_prompt_dinamico(agente))
-
-    # Persistir o estado em disco
-    salvar_dados("agentes.json", "locais.json")
-
-    # Limpar registros e recarregar do disco para demonstrar a função
-    agentes.clear()
-    locais.clear()
-    carregar_dados("agentes.json", "locais.json")
-
-    print("\nEstado restaurado do disco:")
-    for agente in agentes.values():
-        print(f"- {agente.nome} está em {agente.local_atual.nome}")
-
-    # Demonstrar várias iterações de decisões para evidenciar a evolução do
-    # histórico e do prompt adaptativo
+    logging.basicConfig(level=logging.INFO)
     from rh import modulo_rh
+    from ciclo_criativo import executar_ciclo_criativo
+
+    inicializar_automaticamente()
 
     for ciclo in range(1, 4):
-        print(f"\n=== Ciclo {ciclo} ===")
+        logging.info("=== Ciclo %d ===", ciclo)
         modulo_rh.verificar()
+        executar_ciclo_criativo()
         for agente in list(agentes.values()):
             prompt = gerar_prompt_decisao(agente)
             resposta = enviar_para_llm(agente, prompt)
             executar_resposta(agente, resposta)
+        info = calcular_lucro_ciclo()
+        logging.info("Saldo apos ciclo %d: %.2f", ciclo, info["saldo"])
+

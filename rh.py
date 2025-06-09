@@ -13,6 +13,7 @@ from empresa_digital import (
     criar_agente,
     tarefas_pendentes,
     saldo,
+    selecionar_modelo,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,12 +41,18 @@ class ModuloRH:
 
         contratou = False
 
-        # Verifica cada sala
+        # Verifica cada sala com carencia de agentes
         for local in locais.values():
             if len(local.agentes_presentes) < self.min_por_sala and tarefas_pendentes:
                 nome = self._novo_nome()
-                criar_agente(nome, "Funcionario", self.modelo_padrao, local.nome)
-                logger.info("Novo agente %s alocado em %s por falta de pessoal", nome, local.nome)
+                modelo, motivo = selecionar_modelo("Funcionario")
+                criar_agente(nome, "Funcionario", modelo, local.nome)
+                logger.info(
+                    "Novo agente %s alocado em %s por falta de pessoal - %s",
+                    nome,
+                    local.nome,
+                    motivo,
+                )
                 contratou = True
 
         # Conta agentes por funcao
@@ -57,12 +64,14 @@ class ModuloRH:
                 nome = self._novo_nome()
                 primeiro_local = next(iter(locais.values()), None)
                 if primeiro_local:
-                    criar_agente(nome, funcao, self.modelo_padrao, primeiro_local.nome)
+                    modelo, motivo = selecionar_modelo(funcao)
+                    criar_agente(nome, funcao, modelo, primeiro_local.nome)
                     logger.info(
-                        "Novo agente %s contratado para funcao %s (apenas %d existentes)",
+                        "Novo agente %s contratado para funcao %s (apenas %d existentes) - %s",
                         nome,
                         funcao,
                         qtd,
+                        motivo,
                     )
                     contratou = True
 
@@ -72,14 +81,20 @@ class ModuloRH:
             primeiro_local = next(iter(locais.values()), None)
             if primeiro_local:
                 nome = self._novo_nome()
+                modelo, motivo = selecionar_modelo("Executor")
                 criar_agente(
                     nome,
                     "Executor",
-                    self.modelo_padrao,
+                    modelo,
                     primeiro_local.nome,
                     objetivo=tarefa,
                 )
-                logger.info("Agente %s criado para tarefa pendente '%s'", nome, tarefa)
+                logger.info(
+                    "Agente %s criado para tarefa pendente '%s' - %s",
+                    nome,
+                    tarefa,
+                    motivo,
+                )
                 contratou = True
 
         if not contratou:
