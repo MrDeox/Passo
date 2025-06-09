@@ -99,3 +99,16 @@ Os principais endpoints retornam dados em JSON:
 - `DELETE /locais/{nome}` – exclui a sala.
 - `POST /ciclo/next` – executa um novo ciclo da simulação para todos os agentes.
 
+
+
+## Dashboard React
+
+O diretório `dashboard` contém uma aplicação React que permite visualizar os agentes e salas de maneira interativa. Para rodar em modo de desenvolvimento instale as dependências e execute:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Durante a execução é possível movimentar agentes entre salas arrastando seus cards no mapa da empresa. Cada ciclo da simulação também atualiza as posições automaticamente.

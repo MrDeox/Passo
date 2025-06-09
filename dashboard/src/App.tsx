@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button } from './components/ui/Button'
 import { Input } from './components/ui/Input'
 import { Card } from './components/ui/Card'
+import { CompanyMap } from './components/CompanyMap'
 
 const API_URL = 'http://localhost:8000'
 
@@ -87,10 +88,31 @@ export default function App() {
     loadData()
   }
 
+  function handleMoveAgent(id: number, sala: string) {
+    setAgents(prev =>
+      prev.map(a => (a.id === id ? { ...a, salaAtual: sala } : a))
+    )
+    const ag = agents.find(a => a.id === id)
+    if (ag) {
+      setTimeline(prev => [
+        {
+          id: Date.now(),
+          agente: ag.nome,
+          acao: 'Arrasto',
+          sala,
+          motivo: 'Movido manualmente'
+        },
+        ...prev
+      ].slice(0, 50))
+    }
+  }
+
+  function proximoCiclo() {
   async function proximoCiclo() {
     const prev = agents
     const data = await fetch(`${API_URL}/ciclo/next`, { method: 'POST' }).then(r => r.json())
     setAgents(data.agentes)
+
     const eventos: TimelineItem[] = []
     data.agentes.forEach((a: Agent) => {
       const anterior = prev.find(p => p.nome === a.nome)
@@ -134,6 +156,11 @@ export default function App() {
           </Card>
 
       </div>
+
+      <Card>
+        <h2 className="text-xl font-semibold mb-2">Mapa da Empresa</h2>
+        <CompanyMap agentes={agents} salas={salas} onMove={handleMoveAgent} />
+      </Card>
 
       <div className="flex space-x-6">
         <Card className="flex-1">
