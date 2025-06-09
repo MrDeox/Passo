@@ -1,5 +1,7 @@
 import logging
 from typing import List, Optional, Tuple
+from pathlib import Path
+import os
 import requests
 
 from fastapi import FastAPI, HTTPException
@@ -20,6 +22,8 @@ from empresa_digital import (
     enviar_para_llm,
     executar_resposta,
     inicializar_automaticamente,
+    carregar_dados,
+    salvar_dados,
     historico_eventos,
     registrar_evento,
 )
@@ -32,11 +36,28 @@ logging.basicConfig(level=logging.INFO)
 # Instância principal da aplicação FastAPI
 app = FastAPI(title="Empresa Digital API")
 
+DATA_AGENTES = Path(__file__).parent / "agentes.json"
+DATA_LOCAIS = Path(__file__).parent / "locais.json"
+
 
 @app.on_event("startup")
 def _startup() -> None:
-    """Inicializa a empresa de forma totalmente autônoma."""
-    inicializar_automaticamente()
+    """Inicializa a empresa ou carrega dados persistidos."""
+    if (
+        "PYTEST_CURRENT_TEST" not in os.environ
+        and DATA_AGENTES.exists()
+        and DATA_LOCAIS.exists()
+    ):
+        try:
+            carregar_dados(str(DATA_AGENTES), str(DATA_LOCAIS))
+            logging.info(
+                "Dados carregados de %s e %s", DATA_AGENTES, DATA_LOCAIS
+            )
+        except Exception as exc:
+            logging.error("Falha ao carregar dados: %s", exc)
+            inicializar_automaticamente()
+    else:
+        inicializar_automaticamente()
     # Dispara automaticamente o primeiro ciclo de simulacao
     historico_eventos.clear()
     registrar_evento("Inicio automatico da empresa")
@@ -47,6 +68,20 @@ def _startup() -> None:
         resp = enviar_para_llm(ag, prompt)
         executar_resposta(ag, resp)
     calcular_lucro_ciclo()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    """Persiste o estado atual da empresa em disco."""
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    try:
+        salvar_dados(str(DATA_AGENTES), str(DATA_LOCAIS))
+        logging.info(
+            "Dados salvos em %s e %s", DATA_AGENTES, DATA_LOCAIS
+        )
+    except Exception as exc:
+        logging.error("Erro ao salvar dados: %s", exc)
 
 
 def agente_to_dict(ag: Agente) -> dict:
