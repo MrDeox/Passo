@@ -21,6 +21,14 @@ interface Sala {
   agentes: number[]
 }
 
+interface TimelineItem {
+  id: number
+  agente: string
+  acao: string
+  sala: string
+  motivo: string
+}
+
 const initialAgents: Agent[] = [
   {
     id: 1,
@@ -66,6 +74,7 @@ export default function App() {
 
   const [newAgent, setNewAgent] = useState<Partial<Agent>>({})
   const [newSala, setNewSala] = useState<Partial<Sala>>({})
+  const [timeline, setTimeline] = useState<TimelineItem[]>([])
 
   function handleAddAgent() {
     if (!newAgent.nome || !newAgent.funcao || !newAgent.salaAtual || !newAgent.modelo) return
@@ -98,10 +107,58 @@ export default function App() {
   }
 
   function proximoCiclo() {
-    // simula altera\u00e7\u00f5es nos agentes
-    setAgents(prev =>
-      prev.map(a => ({ ...a, estadoEmocional: a.estadoEmocional + (Math.random() > 0.5 ? 1 : -1) }))
-    )
+    const eventos: TimelineItem[] = []
+    setAgents(prev => {
+      return prev.map(a => {
+        const rand = Math.random()
+        let novo = { ...a }
+        if (rand < 0.25 && salas.length > 1) {
+          const destinos = salas.map(s => s.nome).filter(n => n !== a.salaAtual)
+          const destino = destinos[Math.floor(Math.random() * destinos.length)]
+          novo.salaAtual = destino
+          novo.historico = [...novo.historico, `mover para ${destino} -> ok`]
+          eventos.push({
+            id: Date.now() + eventos.length,
+            agente: a.nome,
+            acao: 'Mudança de sala',
+            sala: destino,
+            motivo: `Decidiu ir para ${destino}`,
+          })
+        } else if (rand < 0.5 && prev.length > 1) {
+          const outros = prev.filter(b => b.id !== a.id)
+          const dest = outros[Math.floor(Math.random() * outros.length)]
+          novo.historico = [...novo.historico, `mensagem para ${dest.nome}`]
+          eventos.push({
+            id: Date.now() + eventos.length,
+            agente: a.nome,
+            acao: 'Mensagem',
+            sala: a.salaAtual,
+            motivo: `Enviou mensagem para ${dest.nome}`,
+          })
+        } else if (rand < 0.75) {
+          novo.historico = [...novo.historico, 'ficar -> ok']
+          eventos.push({
+            id: Date.now() + eventos.length,
+            agente: a.nome,
+            acao: 'Decisão',
+            sala: a.salaAtual,
+            motivo: 'Decidiu permanecer na sala',
+          })
+        } else {
+          const novoEmo = a.estadoEmocional + (Math.random() > 0.5 ? 1 : -1)
+          novo.estadoEmocional = novoEmo
+          eventos.push({
+            id: Date.now() + eventos.length,
+            agente: a.nome,
+            acao: 'Emoção',
+            sala: a.salaAtual,
+            motivo: `Mudou para ${novoEmo}`,
+          })
+        }
+        return novo
+      })
+    })
+    setTimeline(prev => [...eventos, ...prev].slice(0, 50))
   }
 
   return (
@@ -123,7 +180,8 @@ export default function App() {
           <Input placeholder="Nome" value={newSala.nome || ''} onChange={e => setNewSala({ ...newSala, nome: e.target.value })} />
           <Input placeholder="Descri\u00e7\u00e3o" value={newSala.descricao || ''} onChange={e => setNewSala({ ...newSala, descricao: e.target.value })} />
           <Button onClick={handleAddSala}>Adicionar</Button>
-        </Card>
+          </Card>
+
       </div>
 
       <div className="flex space-x-6">
@@ -166,6 +224,22 @@ export default function App() {
               <p className="text-sm">Agentes: {agents.filter(a => a.salaAtual === s.nome).map(a => a.nome).join(', ') || 'nenhum'}</p>
             </div>
           ))}
+        </Card>
+        <Card className="flex-1">
+          <h2 className="text-xl font-semibold mb-2">Linha do Tempo</h2>
+          <div className="space-y-2 max-h-96 overflow-auto">
+            {timeline.length === 0 && (
+              <p className="text-sm text-gray-600">Sem eventos ainda</p>
+            )}
+            {timeline.map(ev => (
+              <div key={ev.id} className="border-b pb-1">
+                <p className="text-sm">
+                  <span className="font-medium">{ev.agente}</span> {ev.acao} em {ev.sala}
+                </p>
+                <p className="text-xs text-gray-600">{ev.motivo}</p>
+              </div>
+            ))}
+          </div>
         </Card>
       </div>
 
