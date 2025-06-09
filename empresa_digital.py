@@ -52,6 +52,12 @@ class Agente:
     funcao: str
     modelo_llm: str
     local_atual: Optional[Local] = None
+    historico_acoes: List[str] = field(default_factory=list)
+    historico_interacoes: List[str] = field(default_factory=list)
+    historico_locais: List[str] = field(default_factory=list)
+    objetivo_atual: str = ""
+    feedback_ceo: str = ""
+    estado_emocional: int = 0
 
     def mover_para(self, novo_local: Local) -> None:
         """Move o agente para um novo local, atualizando todas as referências."""
@@ -59,6 +65,21 @@ class Agente:
             self.local_atual.remover_agente(self)
         novo_local.adicionar_agente(self)
         self.local_atual = novo_local
+        # Registra o local visitado mantendo apenas os dois últimos
+        self.historico_locais.append(novo_local.nome)
+        if len(self.historico_locais) > 2:
+            self.historico_locais = self.historico_locais[-2:]
+
+    def registrar_acao(self, descricao: str, sucesso: bool) -> None:
+        """Registra uma ação executada e ajusta o estado emocional."""
+        self.historico_acoes.append(descricao)
+        if len(self.historico_acoes) > 3:
+            self.historico_acoes = self.historico_acoes[-3:]
+
+        # Ajusta o estado emocional em função do resultado da ação.
+        self.estado_emocional += 1 if sucesso else -1
+        # Limita o valor entre -5 e 5 para evitar exageros.
+        self.estado_emocional = max(-5, min(5, self.estado_emocional))
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +88,11 @@ class Agente:
 
 
 def criar_agente(
-    nome: str, funcao: str, modelo_llm: str, local: str
+    nome: str,
+    funcao: str,
+    modelo_llm: str,
+    local: str,
+    objetivo: str = ""
 ) -> Agente:
     """Cria um novo agente e adiciona aos registros.
 
@@ -76,6 +101,7 @@ def criar_agente(
         funcao: Cargo ou função do agente.
         modelo_llm: Modelo de LLM utilizado (ex.: "gpt-3.5-turbo").
         local: Nome do local onde o agente iniciará.
+        objetivo: Objetivo inicial associado ao agente.
 
     Returns:
         O objeto ``Agente`` criado.
@@ -85,10 +111,15 @@ def criar_agente(
         raise ValueError(f"Local '{local}' não encontrado.")
 
     agente = Agente(
-        nome=nome, funcao=funcao, modelo_llm=modelo_llm, local_atual=local_obj
+        nome=nome,
+        funcao=funcao,
+        modelo_llm=modelo_llm,
+        local_atual=local_obj,
+        objetivo_atual=objetivo,
     )
     agentes[nome] = agente
     local_obj.adicionar_agente(agente)
+    agente.historico_locais.append(local_obj.nome)
     return agente
 
 
@@ -132,6 +163,12 @@ def salvar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
             "funcao": ag.funcao,
             "modelo_llm": ag.modelo_llm,
             "local_atual": ag.local_atual.nome if ag.local_atual else None,
+            "historico_acoes": ag.historico_acoes,
+            "historico_interacoes": ag.historico_interacoes,
+            "historico_locais": ag.historico_locais,
+            "objetivo_atual": ag.objetivo_atual,
+            "feedback_ceo": ag.feedback_ceo,
+            "estado_emocional": ag.estado_emocional,
         }
         for nome, ag in agentes.items()
     }
@@ -169,12 +206,18 @@ def carregar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
     with open(arquivo_agentes, "r", encoding="utf-8") as f:
         dados_agentes = json.load(f)
     for info in dados_agentes.values():
-        criar_agente(
+        ag = criar_agente(
             info["nome"],
             info["funcao"],
             info["modelo_llm"],
             info.get("local_atual") or "",
+            info.get("objetivo_atual", ""),
         )
+        ag.historico_acoes = info.get("historico_acoes", [])
+        ag.historico_interacoes = info.get("historico_interacoes", [])
+        ag.historico_locais = info.get("historico_locais", ag.historico_locais)
+        ag.feedback_ceo = info.get("feedback_ceo", "")
+        ag.estado_emocional = info.get("estado_emocional", 0)
 
 
 def gerar_prompt_dinamico(agente: Agente) -> str:
@@ -199,6 +242,21 @@ def gerar_prompt_dinamico(agente: Agente) -> str:
             "Inventário disponível: "
             + (", ".join(local.inventario) if local.inventario else "Nenhum")
         ),
+        (
+            "Últimas ações: "
+            + (" | ".join(agente.historico_acoes[-3:]) if agente.historico_acoes else "Nenhuma")
+        ),
+        (
+            "Últimas interações: "
+            + (" | ".join(agente.historico_interacoes[-3:]) if agente.historico_interacoes else "Nenhuma")
+        ),
+        (
+            "Últimos locais: "
+            + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
+        ),
+        f"Objetivo atual: {agente.objetivo_atual or 'Nenhum'}",
+        f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
+        f"Estado emocional: {agente.estado_emocional}",
     ]
     return "\n".join(partes)
 
@@ -234,6 +292,21 @@ def gerar_prompt_decisao(agente: Agente) -> str:
                     "Outros locais disponíveis: "
                     + ", ".join(nome for nome in locais if nome != local.nome)
                 ),
+                (
+                    "Ações recentes: "
+                    + (" | ".join(agente.historico_acoes[-3:]) if agente.historico_acoes else "Nenhuma")
+                ),
+                (
+                    "Interações recentes: "
+                    + (" | ".join(agente.historico_interacoes[-3:]) if agente.historico_interacoes else "Nenhuma")
+                ),
+                (
+                    "Últimos locais: "
+                    + (" -> ".join(agente.historico_locais[-2:]) if agente.historico_locais else "Nenhum")
+                ),
+                f"Objetivo: {agente.objetivo_atual or 'Nenhum'}",
+                f"Feedback do CEO: {agente.feedback_ceo or 'Nenhum'}",
+                f"Estado emocional: {agente.estado_emocional}",
             ]
         )
 
@@ -285,19 +358,27 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
 
     if acao == "ficar":
         print(f"{agente.nome} permanece em {agente.local_atual.nome}.")
+        agente.registrar_acao("ficar -> ok", True)
     elif acao == "mover":
         destino = dados.get("local")
         if destino and destino in locais:
             mover_agente(agente.nome, destino)
             print(f"{agente.nome} moveu-se para {destino}.")
+            agente.registrar_acao(f"mover para {destino} -> ok", True)
         else:
             print(f"Destino invalido para {agente.nome}: {destino}")
+            agente.registrar_acao(f"mover para {destino} -> falha", False)
     elif acao == "mensagem":
         dest = dados.get("destinatario")
         texto = dados.get("texto", "")
         print(f"{agente.nome} envia mensagem para {dest}: {texto}")
+        agente.historico_interacoes.append(f"para {dest}: {texto}")
+        if len(agente.historico_interacoes) > 3:
+            agente.historico_interacoes = agente.historico_interacoes[-3:]
+        agente.registrar_acao(f"mensagem para {dest}", True)
     else:
         print(f"Acao desconhecida para {agente.nome}: {acao}")
+        agente.registrar_acao(f"acao desconhecida: {acao}", False)
 
 
 # ---------------------------------------------------------------------------
@@ -319,13 +400,25 @@ if __name__ == "__main__":
 
     # Criar três agentes
     alice = criar_agente(
-        "Alice", "Gerente", "gpt-3.5-turbo", "Sala de Reunião"
+        "Alice",
+        "Gerente",
+        "gpt-3.5-turbo",
+        "Sala de Reunião",
+        objetivo="Planejar projeto X",
     )
     bob = criar_agente(
-        "Bob", "Desenvolvedor", "deepseek-chat", "Sala de Tecnologia"
+        "Bob",
+        "Desenvolvedor",
+        "deepseek-chat",
+        "Sala de Tecnologia",
+        objetivo="Implementar tarefa Y",
     )
     carol = criar_agente(
-        "Carol", "Analista", "gpt-3.5-turbo", "Sala de Reunião"
+        "Carol",
+        "Analista",
+        "gpt-3.5-turbo",
+        "Sala de Reunião",
+        objetivo="Coletar requisitos",
     )
 
     # Mover um agente entre salas
@@ -347,8 +440,11 @@ if __name__ == "__main__":
     for agente in agentes.values():
         print(f"- {agente.nome} está em {agente.local_atual.nome}")
 
-    # Demonstrar decisões baseadas em prompt para cada agente
-    for agente in agentes.values():
-        prompt = gerar_prompt_decisao(agente)
-        resposta = enviar_para_llm(agente, prompt)
-        executar_resposta(agente, resposta)
+    # Demonstrar várias iterações de decisões para evidenciar a evolução do
+    # histórico e do prompt adaptativo
+    for ciclo in range(1, 4):
+        print(f"\n=== Ciclo {ciclo} ===")
+        for agente in agentes.values():
+            prompt = gerar_prompt_decisao(agente)
+            resposta = enviar_para_llm(agente, prompt)
+            executar_resposta(agente, resposta)

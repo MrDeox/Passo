@@ -16,6 +16,17 @@ agente entre salas. Ele também exibe prompts dinâmicos contendo informações 
 agente, salva o estado em arquivos JSON e recarrega os dados para provar a
 persistência.
 
+Cada agente mantém um histórico adaptativo contendo:
+
+- últimas 3 ações e resultados
+- últimas mensagens trocadas
+- últimos 2 locais visitados
+- objetivo atual e feedback do CEO
+- um estado emocional que varia conforme o sucesso das ações
+
+Essas informações são incluídas no prompt gerado a cada ciclo, permitindo que a
+IA leve em conta a memória recente do agente.
+
 ## Decisões via LLM
 
 Cada agente pode ter sua próxima ação definida por um modelo de linguagem. A
@@ -43,3 +54,25 @@ Exemplos:
 {"acao": "mover", "local": "Sala de Reunião"}
 {"acao": "mensagem", "destinatario": "Bob", "texto": "bom dia"}
 ```
+
+### Evolução do prompt
+
+Após cada ciclo, o histórico é atualizado e o texto enviado para a IA passa a
+incluir essas informações. Exemplo simplificado de dois ciclos consecutivos para
+um mesmo agente:
+
+```
+Agente: Alice
+Função: Gerente
+Local: Sala de Tecnologia - Laboratório de desenvolvimento
+Últimas ações: mover para Sala de Reunião -> ok
+Últimas interações: para Bob: Preciso de ajuda
+Últimos locais: Sala de Reunião -> Sala de Tecnologia
+Objetivo: Planejar projeto X
+Feedback do CEO: Nenhum
+Estado emocional: 1
+...
+```
+
+No ciclo seguinte, após nova ação, o histórico muda e o estado emocional é
+ajustado conforme o sucesso ou falha, alterando também o prompt enviado.
