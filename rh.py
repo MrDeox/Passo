@@ -3,7 +3,13 @@ from typing import Dict
 
 logging.basicConfig(level=logging.INFO)
 
-from empresa_digital import agentes, locais, criar_agente, tarefas_pendentes
+from empresa_digital import (
+    agentes,
+    locais,
+    criar_agente,
+    tarefas_pendentes,
+    saldo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +30,26 @@ class ModuloRH:
 
     def verificar(self) -> None:
         """Verifica carencias e contrata novos agentes se necessario."""
+        if saldo <= 0:
+            logger.info("Saldo insuficiente, nenhuma contratacao realizada")
+            return
+
+        contratou = False
+
         # Verifica cada sala
         for local in locais.values():
-            if len(local.agentes_presentes) < self.min_por_sala:
+            if len(local.agentes_presentes) < self.min_por_sala and tarefas_pendentes:
                 nome = self._novo_nome()
                 criar_agente(nome, "Funcionario", self.modelo_padrao, local.nome)
                 logger.info("Novo agente %s alocado em %s por falta de pessoal", nome, local.nome)
+                contratou = True
 
         # Conta agentes por funcao
         contagem_funcao: Dict[str, int] = {}
         for ag in agentes.values():
             contagem_funcao[ag.funcao] = contagem_funcao.get(ag.funcao, 0) + 1
         for funcao, qtd in contagem_funcao.items():
-            if qtd < self.min_por_funcao:
+            if qtd < self.min_por_funcao and tarefas_pendentes:
                 nome = self._novo_nome()
                 primeiro_local = next(iter(locais.values()), None)
                 if primeiro_local:
@@ -47,6 +60,7 @@ class ModuloRH:
                         funcao,
                         qtd,
                     )
+                    contratou = True
 
         # Cria agentes para tarefas pendentes
         while tarefas_pendentes:
@@ -54,8 +68,18 @@ class ModuloRH:
             primeiro_local = next(iter(locais.values()), None)
             if primeiro_local:
                 nome = self._novo_nome()
-                criar_agente(nome, "Executor", self.modelo_padrao, primeiro_local.nome, objetivo=tarefa)
+                criar_agente(
+                    nome,
+                    "Executor",
+                    self.modelo_padrao,
+                    primeiro_local.nome,
+                    objetivo=tarefa,
+                )
                 logger.info("Agente %s criado para tarefa pendente '%s'", nome, tarefa)
+                contratou = True
+
+        if not contratou:
+            logger.info("Nenhuma contratacao necessaria neste ciclo")
 
 
 modulo_rh = ModuloRH()

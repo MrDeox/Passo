@@ -8,6 +8,9 @@ from empresa_digital import (
     Local,
     agentes,
     locais,
+    saldo,
+    historico_saldo,
+    calcular_lucro_ciclo,
     criar_agente,
     criar_local,
     mover_agente,
@@ -206,5 +209,10 @@ async def proximo_ciclo():
         resp = enviar_para_llm(ag, prompt)
         executar_resposta(ag, resp)
         resultados.append(agente_to_dict(ag))
-    return {"agentes": resultados}
+    lucro_info = calcular_lucro_ciclo()
+    return {
+        "agentes": resultados,
+        "saldo": lucro_info["saldo"],
+        "historico_saldo": historico_saldo,
+    }
 

@@ -45,6 +45,8 @@ Colegas presentes: Bob
 Inventário disponível: computadores, ferramentas de rede
 Outros locais disponíveis: Sala de Reunião
 
+Seu objetivo final é maximizar o lucro da empresa.
+
 Escolha UMA das ações a seguir e responda apenas em JSON:
 1. 'ficar' - permanecer no local atual.
 2. 'mover' - ir para outro local. Use o campo 'local' com o destino.
@@ -86,6 +88,21 @@ tarefas registradas em `tarefas_pendentes`, o módulo cria automaticamente um
 novo agente (com nome e modelo padrão) e registra a contratação no log. Os
 agentes gerados participam normalmente dos próximos ciclos e aparecem no
 dashboard. Novas tarefas podem ser adicionadas pela função `adicionar_tarefa`.
+
+## Lucro virtual
+
+Cada ciclo contabiliza receitas e custos gerando um **saldo** global. A receita
+é obtida quando agentes executam ações com sucesso (10 unidades por ação) e os
+custos incluem um salário fixo de 5 por agente mais 1 unidade por recurso da
+sala utilizada. O histórico do saldo é registrado e exibido no dashboard.
+
+O RH somente contrata novos agentes quando o saldo é positivo e existem tarefas
+pendentes, sinalizando perspectiva de aumento de lucro. Os prompts de decisão e
+de contexto informam que o objetivo principal é *maximizar o lucro da empresa*.
+
+Exemplo: se o saldo estiver baixo, o RH não abrirá vagas extras mesmo que uma
+sala esteja vazia. Já com saldo alto e tarefas pendentes, novos agentes são
+criados para acelerar a entrega de MVPs e gerar mais receita.
 
 ## API REST
 
