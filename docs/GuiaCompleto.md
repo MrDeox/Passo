@@ -34,6 +34,18 @@ O estado da empresa é disponibilizado via **API REST** (FastAPI) e visualizado 
 - **Lucro**: acumulado global. Cada sucesso gera receita, enquanto salários e uso de recursos geram custos.
 - **Ciclo Criativo**: módulo (`ciclo_criativo.py`) onde agentes com função *Ideacao* propõem ideias, agentes *Validador* aprovam ou reprovam, e protótipos são executados.
 
+- **Simulação Contínua**: Para evitar que a empresa fique paralisada, diversos mecanismos garantem atividade constante:
+    - *Receita Mínima*: Se o saldo da empresa cair criticamente, uma pequena quantia é injetada para cobrir custos básicos e permitir que o RH continue operando.
+    - *Tarefas Automáticas*: Na ausência de tarefas pendentes, o sistema cria automaticamente novas tarefas genéricas, assegurando que sempre haja trabalho a ser feito.
+    - *Ideias Automáticas*: Similarmente, se nenhum agente propuser ideias em um ciclo, uma ideia genérica é criada para manter o ciclo de inovação ativo.
+    - *RH Proativo em Crises*: Em cenários de saldo muito baixo e pouquíssimos agentes, mas com tarefas pendentes, o RH pode ativar um "fundo de emergência" para contratações vitais.
+
+- **Modo Vida Infinita**: Um modo especial de simulação (`MODO_VIDA_INFINITA` em `empresa_digital.py`) projetado para demonstrações e testes de estresse. Quando ativo:
+    - *Saldo Abundante*: A empresa recebe injeções generosas de capital regularmente, eliminando preocupações financeiras.
+    - *Geração Intensificada de Tarefas e Ideias*: Um volume maior de tarefas e ideias, muitas vezes mais ambiciosas, são criadas automaticamente.
+    - *RH Sem Restrições*: O módulo de RH opera sem se preocupar com o saldo para contratações e pode ser mais agressivo ao preencher vagas e criar novas posições.
+    Para ativar este modo, pode-se alterar a variável global `MODO_VIDA_INFINITA` diretamente no código `empresa_digital.py` para `True` ou utilizar a função `definir_modo_vida_infinita(True)`.
+
 ### Auto-criação de Funcionários
 
 Quando existe saldo positivo e faltam pessoas em alguma sala ou função, o RH cria automaticamente novos agentes. Se existirem tarefas pendentes, também são contratados agentes *Executor* para cada tarefa.

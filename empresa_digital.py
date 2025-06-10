@@ -21,6 +21,16 @@ import requests # Adicionado para chamadas HTTP
 # dependencias circulares com o modulo `api` utilizado nos testes e no backend.
 from openrouter_utils import obter_api_key
 
+logger = logging.getLogger(__name__)
+
+MODO_VIDA_INFINITA: bool = False # Default to False
+
+def definir_modo_vida_infinita(ativo: bool) -> None:
+    global MODO_VIDA_INFINITA
+    MODO_VIDA_INFINITA = ativo
+    registrar_evento(f"Modo Vida Infinita {'ativado' if ativo else 'desativado'}.")
+    logger.info(f"Modo Vida Infinita {'ativado' if ativo else 'desativado'}.")
+
 # Configurable delay for OpenRouter API calls
 # Purpose: To control the request rate, avoid hitting rate limits, or for debugging.
 OPENROUTER_CALL_DELAY_SECONDS: float = 1.0
@@ -357,6 +367,19 @@ def calcular_lucro_ciclo() -> dict:
     custos_recursos = sum(len(ag.local_atual.inventario) for ag in agentes.values() if ag.local_atual)
     custos = custos_salario + custos_recursos
     saldo += receita - custos
+
+    if MODO_VIDA_INFINITA:
+        saldo += 1000.0 # Generous income boost
+        registrar_evento(f"VIDA INFINITA: Saldo aumentado em 1000.0. Saldo atual: {saldo:.2f}")
+        # Optionally, ensure it doesn't go below a very high floor
+        if saldo < 5000.0:
+             saldo = 5000.0
+             registrar_evento(f"VIDA INFINITA: Saldo restaurado para 5000.0.")
+    else:
+        if saldo < 10.0:
+            saldo = 10.0
+            registrar_evento(f"Saldo mínimo de 10.0 restaurado para garantir continuidade. Saldo atual: {saldo:.2f}")
+
     historico_saldo.append(saldo)
     return {"saldo": saldo, "receita": receita, "custos": custos}
 
@@ -800,6 +823,28 @@ if __name__ == "__main__":
 
     for ciclo in range(1, 4):
         logging.info("=== Ciclo %d ===", ciclo)
+
+        if not tarefas_pendentes:
+            if MODO_VIDA_INFINITA:
+                novas_tarefas = [
+                    "Expandir para novo mercado internacional",
+                    "Desenvolver funcionalidade revolucionária X",
+                    "Criar campanha de marketing viral",
+                    "Otimizar infraestrutura para escala global",
+                    "Pesquisar aquisição de startup promissora"
+                ]
+                registrar_evento("VIDA INFINITA: Gerando 5 tarefas automáticas.")
+            else:
+                novas_tarefas = [
+                    "Pesquisar novas tecnologias disruptivas",
+                    "Analisar feedback de clientes e propor melhorias"
+                ]
+                registrar_evento("Gerando 2 tarefas automáticas padrão.")
+
+            for nt in novas_tarefas:
+                adicionar_tarefa(nt)
+                registrar_evento(f"Tarefa automática gerada: {nt}")
+
         modulo_rh.verificar()
         executar_ciclo_criativo()
 

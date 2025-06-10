@@ -5,10 +5,12 @@ there is available balance and unmet demand or pending tasks.
 """
 
 import logging
+import random
 from typing import Dict
 
 import empresa_digital as ed
 from empresa_digital import (
+    MODO_VIDA_INFINITA,
     agentes,
     locais,
     criar_agente,
@@ -35,12 +37,28 @@ class ModuloRH:
         return nome
 
     def verificar(self) -> None:
-        """Verifica carencias e contrata novos agentes se necessario."""
+        """Verifica carencias e contrata new agentes se necessario."""
         # Usa o saldo atual do modulo principal para decidir sobre contratações
-        if ed.saldo <= 0:
-            logger.info("Saldo insuficiente, nenhuma contratacao realizada")
-            registrar_evento("RH: saldo insuficiente para contratar")
-            return
+        if not MODO_VIDA_INFINITA: # Only apply saldo logic if not in infinite mode
+            if ed.saldo <= 0:
+                logger.info("Saldo insuficiente para contratações regulares.")
+                registrar_evento("RH: saldo atual insuficiente para contratações regulares.")
+                if ed.tarefas_pendentes and len(ed.agentes) < 2 and random.random() < 0.1: # 10% chance
+                    ed.saldo += 20.0 # Emergency fund
+                    registrar_evento("RH: Fundo de emergência (20.0) ativado para garantir operações mínimas devido a tarefas pendentes e poucos agentes.")
+                    logger.info("RH: Fundo de emergência de 20.0 ativado. Saldo atual: %s", ed.saldo)
+
+                if ed.saldo <= 0:
+                    logger.info("Saldo ainda insuficiente após verificação de emergência, nenhuma contratação realizada.")
+                    registrar_evento("RH: saldo ainda insuficiente após verificação de emergência.")
+                    return
+        else: # In MODO_VIDA_INFINITA
+            registrar_evento("RH: MODO VIDA INFINITA ATIVO - Restrições de saldo ignoradas para contratação.")
+            logger.info("RH: MODO VIDA INFINITA ATIVO - Restrições de saldo ignoradas para contratação.")
+            # Optionally ensure saldo is very high for any logic downstream that might still check it.
+            if ed.saldo < 1000: # Ensure a high baseline for any other checks
+                ed.saldo = 10000.0
+                registrar_evento("RH: MODO VIDA INFINITA - Saldo artificialmente elevado para 10000.")
 
         contratou = False
 

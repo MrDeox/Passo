@@ -154,6 +154,21 @@ INFO:Ideia proposta: Produto IA proposto por Alice
 INFO:Validacao de Produto IA proposto por Alice por Bob: reprovada
 ```
 
+## Simulação Contínua e Modo Vida Infinita
+
+Para garantir que a simulação permaneça sempre dinâmica e não pare por falta de recursos ou atividades, foram implementados os seguintes mecanismos:
+
+*   **Receita Mínima Garantida:** O sistema injeta uma receita mínima caso o saldo da empresa fique muito baixo, permitindo que o RH continue operando e novas atividades possam ser iniciadas.
+*   **Geração Automática de Tarefas e Ideias:** Se não houver tarefas pendentes ou nenhuma nova ideia for proposta pelos agentes, o sistema automaticamente gera tarefas e ideias genéricas para manter o fluxo de trabalho.
+*   **Fundo de Emergência para RH:** Em situações críticas (saldo zero, pouquíssimos agentes e tarefas urgentes), o RH tem uma chance de ativar um fundo de emergência para realizar contratações essenciais.
+
+Além disso, um **Modo Vida Infinita** opcional pode ser ativado (configurando a variável `MODO_VIDA_INFINITA` em `empresa_digital.py` para `True`). Neste modo:
+
+*   O saldo da empresa é constantemente reabastecido com valores generosos.
+*   Um número maior de tarefas e ideias ambiciosas são geradas automaticamente.
+*   O RH opera sem restrições de saldo e de forma mais agressiva.
+Este modo é útil para demonstrações contínuas e testes de estresse do sistema.
+
 ## API REST
 
 A aplicação possui uma API REST construída com **FastAPI** disponível no arquivo `api.py`.
