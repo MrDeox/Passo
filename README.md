@@ -242,13 +242,13 @@ decisões de cada agente.
 
 Para cenários sem interface visual há o script `start_backend.py`. Ele
 inicia apenas o backend FastAPI e já executa todo o processo de
-inicialização automática (salas, agentes, ciclo criativo, RH). Antes de
-executar, defina a variável `OPENROUTER_API_KEY` ou crie o arquivo
-`.openrouter_key` com sua chave. Não há qualquer prompt interativo.
+inicialização automática (salas, agentes, ciclo criativo, RH). A chave da
+OpenRouter pode ser passada diretamente pela flag `--apikey` (que tem
+prioridade sobre variáveis de ambiente ou arquivo `.openrouter_key`).
+Há também a flag `--infinite` para ativar o **Modo Vida Infinita**.
 
 ```bash
-export OPENROUTER_API_KEY=XXXX
-python start_backend.py
+python start_backend.py --apikey MINHA_CHAVE --infinite
 ```
 
 O backend ficará acessível em `http://localhost:8000` (ou na porta
@@ -322,16 +322,11 @@ Para rodar a empresa digital apenas pela linha de comando:
 
 1. Garanta que as dependências do backend estejam instaladas (`pip install -r
    requirements.txt`).
-2. Defina `OPENROUTER_API_KEY` com uma chave válida (ou crie o arquivo
-   `.openrouter_key`). Exemplo:
+2. Inicie o backend informando a chave diretamente na flag `--apikey` e,
+   opcionalmente, ative o modo infinito com `--infinite`:
 
    ```bash
-   export OPENROUTER_API_KEY=sk-my-key
-   ```
-3. Inicie o backend:
-
-   ```bash
-   python start_backend.py
+   python start_backend.py --apikey sk-minha-chave --infinite
    ```
 
    O script imprime onde os dados são salvos e, quando o servidor está pronto,

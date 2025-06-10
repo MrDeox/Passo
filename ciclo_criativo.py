@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Dict
 
-from empresa_digital import MODO_VIDA_INFINITA, agentes, adicionar_tarefa, registrar_evento
+import empresa_digital as ed
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +30,20 @@ def propor_ideias() -> List[Ideia]:
     """Gera ideias simuladas a partir de agentes com funcao 'Ideacao'."""
     ideias = []
     tema = _tema_preferido()
-    for ag in agentes.values():
+    for ag in ed.agentes.values():
         if ag.funcao.lower() == "ideacao":
             desc = f"Produto {tema} proposto por {ag.nome}"
             justificativa = f"Explora {tema} com alto potencial de lucro"
             ideia = Ideia(descricao=desc, justificativa=justificativa, autor=ag.nome)
             ideias.append(ideia)
             logger.info("Ideia proposta: %s", desc)
-            registrar_evento(f"Ideia proposta: {desc}")
+            ed.registrar_evento(f"Ideia proposta: {desc}")
     return ideias
 
 
 def validar_ideias(ideias: List[Ideia]) -> None:
     """Valida as ideias usando agentes com funcao 'Validador'."""
-    validadores = [a for a in agentes.values() if a.funcao.lower() == "validador"]
+    validadores = [a for a in ed.agentes.values() if a.funcao.lower() == "validador"]
     for ideia in ideias:
         for val in validadores:
             aprovado = "ia" in ideia.descricao.lower()
@@ -53,12 +53,12 @@ def validar_ideias(ideias: List[Ideia]) -> None:
                 val.nome,
                 "aprovada" if aprovado else "reprovada",
             )
-            registrar_evento(
+            ed.registrar_evento(
                 f"Validacao de {ideia.descricao} por {val.nome}: {'aprovada' if aprovado else 'reprovada'}"
             )
             if aprovado:
                 ideia.validada = True
-                adicionar_tarefa(ideia.descricao)
+                ed.adicionar_tarefa(ideia.descricao)
                 break
 
 
@@ -77,7 +77,7 @@ def prototipar_ideias(ideias: List[Ideia]) -> None:
             ideia.descricao,
             ideia.resultado,
         )
-        registrar_evento(
+        ed.registrar_evento(
             f"Prototipo de {ideia.descricao} resultou em {ideia.resultado:.2f}"
         )
 
@@ -86,8 +86,8 @@ def executar_ciclo_criativo() -> None:
     """Executa um ciclo completo de ideacao, validacao e prototipagem."""
     ideias = propor_ideias()
     if not ideias:
-        if MODO_VIDA_INFINITA:
-            registrar_evento("VIDA INFINITA: Gerando 3 ideias automáticas.")
+        if ed.MODO_VIDA_INFINITA:
+            ed.registrar_evento("VIDA INFINITA: Gerando 3 ideias automáticas.")
             logger.info("VIDA INFINITA: Nenhuma ideia proposta por agentes. Gerando 3 ideias automáticas.")
             ideias_automaticas = [
                 Ideia(
@@ -115,7 +115,7 @@ def executar_ciclo_criativo() -> None:
                 autor="Sistema Criativo Automático"
             )
             ideias.append(ideia_automatica)
-            registrar_evento(f"Ideia automática gerada: {ideia_automatica.descricao}")
+            ed.registrar_evento(f"Ideia automática gerada: {ideia_automatica.descricao}")
             logger.info("Nenhuma ideia proposta por agentes. Gerada ideia automática: %s", ideia_automatica.descricao)
     validar_ideias(ideias)
     prototipar_ideias(ideias)

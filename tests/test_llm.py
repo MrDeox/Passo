@@ -187,9 +187,10 @@ def test_chamar_openrouter_api_no_retry_on_non_retryable_code(mock_time_sleep, m
 
     result = ed.chamar_openrouter_api(agente, prompt)
 
-    mock_requests_post.assert_called_once()
-    # Only the initial delay sleep should be called
-    mock_time_sleep.assert_called_once_with(0)
+    # A chamada deve ser repetida ate o limite de 3 tentativas
+    assert mock_requests_post.call_count == 3
+    # Devem ocorrer chamadas de sleep com backoff exponencial
+    mock_time_sleep.assert_has_calls([call(0), call(1), call(2)])
 
     # The error is caught by the generic RequestException handler after raise_for_status
     expected_error_payload = {"error": "API call failed", "details": "Bad Request"}
@@ -286,8 +287,9 @@ def test_chamar_openrouter_api_http_error_non_retryable_401(mock_time_sleep, moc
 
     result = ed.chamar_openrouter_api(agente, prompt)
 
-    mock_requests_post.assert_called_once()
-    mock_time_sleep.assert_called_once_with(0) # Only initial delay sleep
+    # Deve tentar 3 vezes
+    assert mock_requests_post.call_count == 3
+    mock_time_sleep.assert_has_calls([call(0), call(1), call(2)])
 
     loaded_result = json.loads(result)
     assert loaded_result["error"] == "API call failed" # This is the generic wrapper for RequestException

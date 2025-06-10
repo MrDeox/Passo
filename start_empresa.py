@@ -3,6 +3,7 @@ import sys
 import time
 from pathlib import Path
 from getpass import getpass
+import argparse
 import subprocess
 import requests
 
@@ -12,6 +13,17 @@ FRONTEND_PORT = os.environ.get("FRONTEND_PORT", "5173")
 KEY_FILE = ROOT / ".openrouter_key"
 DATA_AGENTES = ROOT / "agentes.json"
 DATA_LOCAIS = ROOT / "locais.json"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Inicia backend e frontend")
+    parser.add_argument("--apikey", help="Chave da OpenRouter")
+    parser.add_argument(
+        "--infinite",
+        action="store_true",
+        help="Ativa o modo Vida Infinita durante a simulacao",
+    )
+    return parser.parse_args()
 
 
 def ensure_api_key() -> None:
@@ -57,6 +69,11 @@ def show_status(port: str) -> None:
 
 
 def main() -> None:
+    args = parse_args()
+    if args.apikey:
+        os.environ["OPENROUTER_API_KEY"] = args.apikey.strip()
+    if args.infinite:
+        os.environ["MODO_VIDA_INFINITA"] = "1"
     ensure_api_key()
     install_dependencies()
     print("Arquivos de dados serao armazenados em:")
