@@ -1,17 +1,21 @@
 # -*- coding: utf-8 -*-
-"""Esqueleto de um sistema para simular uma empresa digital.
+"""Simulador de uma empresa digital impulsionada por Modelos de Linguagem (LLMs).
 
-Este módulo define classes e funções básicas para representar agentes
-(equivalentes a funcionários ou bots) e locais da empresa.
-
-O objetivo é ter um ponto de partida para criação de interações mais
-complexas no futuro.
+Este módulo define a estrutura central para simular uma empresa onde agentes,
+representados como entidades de software, tomam decisões e interagem com base
+em prompts processados por LLMs através da API OpenRouter.
+Ele gerencia o estado da empresa, incluindo agentes, locais, finanças e
+o fluxo de eventos e decisões.
 """
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import json
 import logging
+import requests # Adicionado para chamadas HTTP
+# import json # Já importado acima
+# import logging # Já importado acima
+from api import obter_api_key # Adicionado para obter a chave da API
 
 # ---------------------------- Lucro da empresa ----------------------------
 # Saldo acumulado da empresa ao longo da simulação. Cada ciclo soma receitas e
@@ -63,11 +67,15 @@ class Local:
 
 @dataclass
 class Agente:
-    """Representa um agente da empresa."""
+    """Representa um agente (funcionário ou bot) na empresa digital.
+
+    As decisões do agente são conduzidas por um Modelo de Linguagem (LLM)
+    especificado em `modelo_llm`, que é usado para chamadas via OpenRouter.
+    """
 
     nome: str
     funcao: str
-    modelo_llm: str
+    modelo_llm: str  # Modelo de LLM da OpenRouter (ex: "anthropic/claude-3-haiku", "openai/gpt-4-turbo")
     local_atual: Optional[Local] = None
     historico_acoes: List[str] = field(default_factory=list)
     historico_interacoes: List[str] = field(default_factory=list)
@@ -440,76 +448,242 @@ def gerar_prompt_decisao(agente: Agente) -> str:
     return f"{contexto}\n\n{instrucoes}"
 
 
+def chamar_openrouter_api(agente: Agente, prompt: str) -> str:
+    """Envia um prompt para a API OpenRouter e retorna a resposta do LLM.
+
+    Args:
+        agente: O objeto Agente para o qual o prompt é destinado.
+        prompt: O prompt textual a ser enviado para o LLM.
+
+    Returns:
+        A resposta textual do LLM (geralmente uma string JSON representando
+        a decisão do agente) ou uma string JSON de erro em caso de falha na
+        chamada da API ou processamento da resposta.
+
+    Raises:
+        Não lança exceções diretamente, mas retorna strings JSON de erro
+        em casos como falha na API, chave não encontrada, timeout, ou
+        estrutura de resposta inesperada. Erros são logados.
+    """
+    logging.debug(f"Iniciando chamada para OpenRouter API para o agente {agente.nome} com modelo {agente.modelo_llm}.")
+    logging.debug(f"Prompt enviado para OpenRouter (modelo {agente.modelo_llm}):\n{prompt}")
+
+    try:
+        api_key = obter_api_key()
+        if not api_key:
+            logging.error("OPENROUTER_API_KEY não configurada.") # Mensagem mais clara
+            return json.dumps({"error": "API key not found", "details": "OpenRouter API key is missing or not configured."})
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": agente.modelo_llm,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        logging.debug(f"Resposta crua da OpenRouter (status {response.status_code}): {response.text}")
+        response.raise_for_status()
+
+        response_data = response.json()
+
+        # Extrai o conteúdo da mensagem do LLM
+        # Adicionado tratamento defensivo para diferentes estruturas de resposta
+        if response_data.get("choices") and \
+           isinstance(response_data["choices"], list) and \
+           len(response_data["choices"]) > 0 and \
+           response_data["choices"][0].get("message") and \
+           isinstance(response_data["choices"][0]["message"], dict) and \
+           response_data["choices"][0]["message"].get("content"):
+            content = response_data['choices'][0]['message']['content']
+            return content
+        else:
+            logging.error("Estrutura de resposta da API OpenRouter inesperada: %s", response_data) # Mantido logging.error
+            return json.dumps({"error": "Invalid response structure", "details": "Unexpected API response format."})
+
+    except requests.exceptions.Timeout as e:
+        logging.error("Timeout durante a chamada para a API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
+        return json.dumps({"error": "API call failed", "details": "Request timed out."})
+    except requests.exceptions.RequestException as e:
+        logging.error("Erro na chamada para a API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
+        return json.dumps({"error": "API call failed", "details": str(e)})
+    except json.JSONDecodeError as e: # Especificar JSONDecodeError para parsing da resposta da API
+        logging.error("Erro ao decodificar JSON da resposta da API OpenRouter para o agente %s: %s. Resposta: %s", agente.nome, e, response.text if 'response' in locals() else "N/A")
+        return json.dumps({"error": "API call failed", "details": "Invalid JSON response from API."})
+    except (KeyError, IndexError, TypeError) as e:
+        logging.error("Erro ao processar estrutura da resposta da API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
+        return json.dumps({"error": "Invalid response structure", "details": str(e)})
+
+
 def enviar_para_llm(agente: Agente, prompt: str) -> str:
     registrar_evento(f"Prompt para {agente.nome}")
-    """Simula o envio do prompt para o modelo LLM do agente.
+    """Envia o prompt para o modelo LLM do agente usando a API OpenRouter.
 
-    No lugar da chamada real à API, apenas imprime o prompt e retorna uma
-    string fixa representando a resposta da IA. Em um cenário real, esta
-    função faria a requisição de rede ao provedor de LLM configurado.
+    Args:
+        agente: O objeto `Agente` que está tomando a decisão.
+        prompt: O prompt textual formatado para guiar a decisão do LLM.
+
+    Returns:
+        A resposta do LLM (normalmente uma string JSON) conforme recebida
+        de `chamar_openrouter_api`. Esta resposta será então processada
+        por `executar_resposta`.
     """
+    # registrar_evento(f"Prompt para {agente.nome}") # Evento já registrado em gerar_prompt_decisao ou similar
 
-    print(f"\n--- Prompt enviado para {agente.modelo_llm} ({agente.nome}) ---")
-    print(prompt)
-    print("--- Fim do prompt ---\n")
+    logging.info(f"Enviando prompt para LLM {agente.modelo_llm} para o agente {agente.nome}.")
+    resposta_llm = chamar_openrouter_api(agente, prompt)
 
-    # Resposta simulada apenas para fins de demonstração.
-    respostas_simuladas = {
-        "Alice": '{"acao": "mover", "local": "Sala de Reunião"}',
-        "Bob": '{"acao": "mensagem", "destinatario": "Carol", "texto": "Preciso de ajuda"}',
-        "Carol": '{"acao": "ficar"}',
-    }
-    resp = respostas_simuladas.get(agente.nome, '{"acao": "ficar"}')
-    registrar_evento(f"Resposta de {agente.nome}: {resp}")
-    return resp
+    registrar_evento(f"Resposta recebida de {agente.modelo_llm} para {agente.nome}: {resposta_llm[:200]}...") # Log truncado
+    logging.debug(f"Resposta completa de {agente.modelo_llm} para {agente.nome}: {resposta_llm}")
+    return resposta_llm
 
 
 def executar_resposta(agente: Agente, resposta: str) -> None:
-    """Executa a ação retornada pelo LLM para o agente."""
+    """Interpreta e executa a ação contida na resposta do LLM para um agente.
 
+    A função é projetada para ser robusta, lidando com diversos cenários de erro:
+    1.  Erros pré-definidos pela função `chamar_openrouter_api` (falhas na API, etc.).
+    2.  Respostas que não são JSON válidos.
+    3.  JSONs que não contêm uma ação ('acao') válida ou esperada.
+    4.  Ações que possuem parâmetros inválidos (ex: local de 'mover' inexistente).
+
+    Em muitos casos de erro, a função aplica um fallback para a ação 'ficar',
+    garantindo que o agente execute uma ação segura. Todas as etapas, erros e
+    fallbacks são devidamente logados.
+    """
+
+    # 1. Handle API Error JSON from chamar_openrouter_api
+    # Simple string check for known error structures before JSON parsing
+    if '"error": "API call failed"' in resposta or \
+       '"error": "Invalid response structure"' in resposta or \
+       '"error": "API key not found"' in resposta:
+        # Log já feito em chamar_openrouter_api, aqui apenas registramos o evento e ação do agente
+        msg_evento = f"Erro na chamada da API LLM para {agente.nome}, usando resposta de erro: {resposta}"
+        registrar_evento(msg_evento)
+        # logging.error(msg_evento) # O log detalhado já foi feito em chamar_openrouter_api
+        agente.registrar_acao("API call error -> falha", False)
+        # Decidido não aplicar fallback automático para 'ficar' aqui, pois o erro é na comunicação com LLM.
+        return
+
+    dados: Optional[dict] = None
     try:
         dados = json.loads(resposta)
     except json.JSONDecodeError:
-        msg = f"Resposta inválida para {agente.nome}: {resposta}"
+        msg = f"Resposta JSON inválida do LLM para {agente.nome}: {resposta}"
         registrar_evento(msg)
-        print(msg)
+        logging.error(msg)
+        agente.registrar_acao("invalid JSON response -> falha", False)
+
+        acao_fallback = "ficar"
+        logging.warning(f"Fallback: {agente.nome} vai '{acao_fallback}' devido a JSON inválido. Resposta original: {resposta}")
+        msg_ficar = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback por JSON inválido)."
+        registrar_evento(msg_ficar)
+        logging.info(msg_ficar)
+        agente.registrar_acao(f"{acao_fallback} (fallback JSON) -> ok", True)
         return
 
     acao = dados.get("acao")
+    valid_actions = ["ficar", "mover", "mensagem"]
+
+    if acao not in valid_actions:
+        msg = f"Acao invalida ('{acao}') ou ausente na resposta do LLM para {agente.nome}. Resposta: {resposta}"
+        registrar_evento(msg)
+        logging.warning(msg)
+        agente.registrar_acao(f"acao invalida '{acao}' -> falha", False)
+
+        acao_fallback_str = "ficar"
+        logging.warning(f"Fallback: {agente.nome} vai '{acao_fallback_str}' devido à ação inválida '{acao}'. Resposta original: {resposta}")
+        msg_ficar_direct = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback por ação '{acao}' inválida)."
+        registrar_evento(msg_ficar_direct)
+        logging.info(msg_ficar_direct)
+        agente.registrar_acao(f"{acao_fallback_str} (fallback acao) -> ok", True)
+        return
+
+    # Log da ação escolhida antes da execução
+    if acao == "ficar":
+        logging.info(f"{agente.nome} decidiu 'ficar' em {agente.local_atual.nome if agente.local_atual else 'local desconhecido'}.")
+    elif acao == "mover":
+        destino = dados.get("local", "destino desconhecido")
+        logging.info(f"{agente.nome} decidiu 'mover' para '{destino}'.")
+    elif acao == "mensagem":
+        destinatario = dados.get("destinatario", "destinatário desconhecido")
+        texto_msg = dados.get("texto", "")
+        logging.info(f"{agente.nome} decidiu 'mensagem' para '{destinatario}' com texto: '{texto_msg[:50]}...'")
+
 
     if acao == "ficar":
         msg = f"{agente.nome} permanece em {agente.local_atual.nome}."
         registrar_evento(msg)
-        print(msg)
+        logging.info(msg)
         agente.registrar_acao("ficar -> ok", True)
     elif acao == "mover":
         destino = dados.get("local")
-        if destino and destino in locais:
+        if not isinstance(destino, str) or not destino:
+            msg = f"Tentativa de mover {agente.nome} para destino inválido (ausente ou formato incorreto): '{destino}'."
+            registrar_evento(msg)
+            logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
+            agente.registrar_acao(f"mover para '{destino}' -> falha (destino invalido)", False)
+
+            msg_ficar_fallback_mover = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mover' por destino inválido)."
+            registrar_evento(msg_ficar_fallback_mover)
+            logging.info(msg_ficar_fallback_mover)
+            agente.registrar_acao("ficar (fallback mover) -> ok", True)
+        elif destino not in locais:
+            msg = f"Destino '{destino}' não encontrado para {agente.nome}."
+            registrar_evento(msg)
+            logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
+            agente.registrar_acao(f"mover para '{destino}' -> falha (local nao existe)", False)
+
+            msg_ficar_fallback_local_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mover' - local '{destino}' inexistente)."
+            registrar_evento(msg_ficar_fallback_local_inexistente)
+            logging.info(msg_ficar_fallback_local_inexistente)
+            agente.registrar_acao("ficar (fallback mover local) -> ok", True)
+        else:
             mover_agente(agente.nome, destino)
             msg = f"{agente.nome} moveu-se para {destino}."
             registrar_evento(msg)
-            print(msg)
+            logging.info(msg)
             agente.registrar_acao(f"mover para {destino} -> ok", True)
-        else:
-            msg = f"Destino invalido para {agente.nome}: {destino}"
-            registrar_evento(msg)
-            print(msg)
-            agente.registrar_acao(f"mover para {destino} -> falha", False)
     elif acao == "mensagem":
-        dest = dados.get("destinatario")
-        texto = dados.get("texto", "")
-        msg = f"{agente.nome} envia mensagem para {dest}: {texto}"
-        registrar_evento(msg)
-        print(msg)
-        agente.historico_interacoes.append(f"para {dest}: {texto}")
-        if len(agente.historico_interacoes) > 3:
-            agente.historico_interacoes = agente.historico_interacoes[-3:]
-        agente.registrar_acao(f"mensagem para {dest}", True)
-    else:
-        msg = f"Acao desconhecida para {agente.nome}: {acao}"
-        registrar_evento(msg)
-        print(msg)
-        agente.registrar_acao(f"acao desconhecida: {acao}", False)
+        destinatario = dados.get("destinatario")
+        texto = dados.get("texto")
+
+        if not isinstance(destinatario, str) or not destinatario or \
+           not isinstance(texto, str) or texto is None:
+            msg = f"Mensagem de {agente.nome} com destinatário ou texto inválido/ausente. Dest: '{destinatario}', Texto: '{texto}'."
+            registrar_evento(msg)
+            logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
+            agente.registrar_acao(f"mensagem para '{destinatario}' -> falha (dados invalidos)", False)
+
+            msg_ficar_fallback_msg = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mensagem' por dados inválidos)."
+            registrar_evento(msg_ficar_fallback_msg)
+            logging.info(msg_ficar_fallback_msg)
+            agente.registrar_acao("ficar (fallback mensagem) -> ok", True)
+        elif destinatario not in agentes:
+            msg = f"Destinatário '{destinatario}' da mensagem de {agente.nome} não encontrado."
+            registrar_evento(msg)
+            logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
+            agente.registrar_acao(f"mensagem para '{destinatario}' -> falha (destinatario nao existe)", False)
+
+            msg_ficar_fallback_msg_dest_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mensagem' - destinatário '{destinatario}' inexistente)."
+            registrar_evento(msg_ficar_fallback_msg_dest_inexistente)
+            logging.info(msg_ficar_fallback_msg_dest_inexistente)
+            agente.registrar_acao("ficar (fallback msg dest) -> ok", True)
+        else:
+            msg = f"{agente.nome} envia mensagem para {destinatario}: {texto}"
+            registrar_evento(msg)
+            logging.info(msg) # Log da ação de mensagem já informa os detalhes.
+            agente.historico_interacoes.append(f"para {destinatario}: {texto}")
+            if len(agente.historico_interacoes) > 3:
+                agente.historico_interacoes = agente.historico_interacoes[-3:]
+            agente.registrar_acao(f"mensagem para {destinatario} -> ok", True)
 
 
 # ---------------------------------------------------------------------------
@@ -517,9 +691,17 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    """Demonstra a inicialização e alguns ciclos totalmente autônomos."""
+    """Demonstra a inicialização e alguns ciclos da simulação.
 
-    logging.basicConfig(level=logging.INFO)
+    Este exemplo configura o logging, inicializa a empresa (agentes e locais),
+    e executa alguns ciclos de simulação onde os agentes tomam decisões
+    baseadas em LLM.
+    """
+
+    # Configuração básica de logging para ver INFO e DEBUG messages.
+    # Em uma aplicação real, isso pode ser mais configurável.
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+
     from rh import modulo_rh
     from ciclo_criativo import executar_ciclo_criativo
 
