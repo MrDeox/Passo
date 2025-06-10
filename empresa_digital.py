@@ -19,19 +19,33 @@ import requests  # Adicionado para chamadas HTTP
 # import json # Já importado acima
 # import logging # Já importado acima
 
-# Imports do ciclo_criativo para persistência do histórico de ideias
-# e de core_types para a definição de Ideia.
-from .core_types import Ideia
-from ciclo_criativo import salvar_historico_ideias, carregar_historico_ideias
+# Imports do ciclo_criativo para persistência do histórico de ideias e serviços
+# e de core_types para a definição de Ideia e Service.
+from .core_types import Ideia, Service # Service é potencialmente usado aqui se empresa_digital manipular serviços diretamente
 
 # A funcao para buscar a API key deve vir de openrouter_utils para evitar
 # dependencias circulares com o modulo `api` utilizado nos testes e no backend.
 from openrouter_utils import obter_api_key
 
+# Módulo ciclo_criativo importado com alias para evitar conflitos e usado para acessar seus membros.
+import ciclo_criativo as cc
+# Acesso direto a historico_ideias e historico_servicos para conveniência onde usado.
+from ciclo_criativo import historico_ideias, historico_servicos
+
+
 logger = logging.getLogger(__name__)
 
 # Permite ativar o modo Vida Infinita via variavel de ambiente
 MODO_VIDA_INFINITA: bool = os.environ.get("MODO_VIDA_INFINITA", "0") == "1"
+# Define a factor for converting service effort hours to simulation time (e.g., cycles or time units)
+# This could be configured elsewhere, e.g., based on MODO_VIDA_INFINITA or other sim params
+# If 1 cycle = 1 day, and agents work 8 hours a day, this factor could be 1.0
+# If 1 cycle is shorter, this factor would be smaller.
+# Let's assume 1 cycle can achieve 8 hours of work for simplicity in this factor.
+# A lower value means services take more cycles to complete for the same effort_hours.
+HOURS_PER_CYCLE_FACTOR = 8.0
+# In MODO_VIDA_INFINITA, perhaps services complete faster to accelerate progress
+HOURS_PER_CYCLE_FACTOR_VIDA_INFINITA = 16.0
 
 def definir_modo_vida_infinita(ativo: bool) -> None:
     global MODO_VIDA_INFINITA
@@ -292,8 +306,13 @@ def adicionar_tarefa(tarefa: str) -> None:
     tarefas_pendentes.append(tarefa)
 
 
-def salvar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_ideias: str = "historico_ideias.json") -> None:
-    """Salva os dicionários globais de agentes, locais e o histórico de ideias em arquivos JSON.
+def salvar_dados(
+    arquivo_agentes: str,
+    arquivo_locais: str,
+    arquivo_historico_ideias: str = "historico_ideias.json",
+    arquivo_historico_servicos: str = "servicos.json" # Novo parâmetro
+) -> None:
+    """Salva os dicionários globais de agentes, locais, histórico de ideias e serviços em arquivos JSON.
 
     Somente informações necessárias para reconstrução dos objetos são
     persistidas (nome do local em que cada agente está, por exemplo).
@@ -333,10 +352,17 @@ def salvar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_id
 
     # Salvar histórico de ideias
     salvar_historico_ideias(arquivo_historico_ideias)
+    # Salvar histórico de serviços
+    salvar_historico_servicos(arquivo_historico_servicos)
 
 
-def carregar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_ideias: str = "historico_ideias.json") -> None:
-    """Carrega arquivos JSON recriando os dicionários de agentes, locais e o histórico de ideias."""
+def carregar_dados(
+    arquivo_agentes: str,
+    arquivo_locais: str,
+    arquivo_historico_ideias: str = "historico_ideias.json",
+    arquivo_historico_servicos: str = "servicos.json" # Novo parâmetro
+) -> None:
+    """Carrega arquivos JSON recriando os dicionários de agentes, locais, histórico de ideias e serviços."""
 
     global agentes, locais
     agentes = {}
@@ -439,18 +465,8 @@ def carregar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_
 
     # Carregar histórico de ideias
     carregar_historico_ideias(arquivo_historico_ideias)
-        ag = criar_agente(
-            info["nome"],
-            info["funcao"],
-            info["modelo_llm"],
-            info.get("local_atual") or "",
-            info.get("objetivo_atual", ""),
-        )
-        ag.historico_acoes = info.get("historico_acoes", [])
-        ag.historico_interacoes = info.get("historico_interacoes", [])
-        ag.historico_locais = info.get("historico_locais", ag.historico_locais)
-        ag.feedback_ceo = info.get("feedback_ceo", "")
-        ag.estado_emocional = info.get("estado_emocional", 0)
+    # Carregar histórico de serviços
+    carregar_historico_servicos(arquivo_historico_servicos)
 
 
 def calcular_lucro_ciclo() -> dict:
@@ -462,9 +478,25 @@ def calcular_lucro_ciclo() -> dict:
             receita += 10.0
 
     custos_salario = len(agentes) * 5.0
-    custos_recursos = sum(len(ag.local_atual.inventario) for ag in agentes.values() if ag.local_atual)
+    custos_recursos = sum(len(ag.local_atual.inventario) for ag in agentes.values() if ag.local_atual and ag.local_atual.inventario)
     custos = custos_salario + custos_recursos
-    saldo += receita - custos
+
+    # Calcular receita de serviços concluídos
+    receita_servicos = 0.0
+    # historico_servicos é importado diretamente de ciclo_criativo
+    for servico in historico_servicos:
+        if servico.status == "completed" and not servico.revenue_calculated:
+            if servico.pricing_model == "fixed_price":
+                receita_servicos += servico.price_amount
+                registrar_evento(f"Receita de R${servico.price_amount:.2f} adicionada pelo serviço de preço fixo '{servico.service_name}'.")
+            elif servico.pricing_model == "hourly_rate":
+                receita_total_servico_horista = servico.price_amount * servico.estimated_effort_hours
+                receita_servicos += receita_total_servico_horista
+                registrar_evento(f"Receita de R${receita_total_servico_horista:.2f} adicionada pelo serviço por hora '{servico.service_name}'.")
+            servico.revenue_calculated = True # Marcar para não calcular novamente
+
+    receita_total_ciclo = receita + receita_servicos # Receita de ações de agentes + receita de serviços
+    saldo += receita_total_ciclo - custos
 
     if MODO_VIDA_INFINITA:
         saldo += 1000.0 # Generous income boost
@@ -479,7 +511,7 @@ def calcular_lucro_ciclo() -> dict:
             registrar_evento(f"Saldo mínimo de 10.0 restaurado para garantir continuidade. Saldo atual: {saldo:.2f}")
 
     historico_saldo.append(saldo)
-    return {"saldo": saldo, "receita": receita, "custos": custos}
+    return {"saldo": saldo, "receita_total_ciclo": receita_total_ciclo, "receita_acoes_agentes": receita, "receita_servicos": receita_servicos, "custos": custos}
 
 
 def gerar_prompt_dinamico(agente: Agente) -> str:
@@ -574,18 +606,71 @@ def gerar_prompt_decisao(agente: Agente) -> str:
             ]
         )
 
-    instrucoes = (
-        "Seu objetivo final é maximizar o lucro da empresa de forma autônoma e criativa.\n"
-        "Escolha UMA das ações a seguir e responda apenas em JSON:\n"
-        "1. 'ficar' - permanecer no local atual.\n"
-        "2. 'mover' - ir para outro local. Use o campo 'local' com o destino.\n"
-        "3. 'mensagem' - enviar uma mensagem. Use 'destinatario' e 'texto'.\n"
-        "Exemplos:\n"
-        '{"acao": "ficar"}\n'
-        '{"acao": "mover", "local": "Sala de Reunião"}\n'
-        '{"acao": "mensagem", "destinatario": "Bob", "texto": "bom dia"}'
-    )
+    instrucoes_base = [
+        "Seu objetivo final é maximizar o lucro da empresa de forma autônoma e criativa.",
+        "Escolha UMA das ações a seguir e responda apenas em JSON:",
+        "1. 'ficar' - permanecer no local atual. Ex: {\"acao\": \"ficar\"}",
+        "2. 'mover' - ir para outro local. Ex: {\"acao\": \"mover\", \"local\": \"Sala de Reunião\"}",
+        "3. 'mensagem' - enviar uma mensagem. Ex: {\"acao\": \"mensagem\", \"destinatario\": \"Bob\", \"texto\": \"bom dia\"}",
+    ]
 
+    # Add service assignment & task proposal for CEO
+    if agente.funcao.lower() == "ceo":
+        # Company Status Summary
+        contexto += f"\n\n--- Resumo da Empresa ---\nSaldo Atual: R${saldo:.2f}\n"
+
+        # Active Ideas (Validated but not yet fully executed/product link might be missing)
+        # historico_ideias is imported directly from ciclo_criativo
+        active_ideas = [i for i in historico_ideias if i.validada and not i.executada] # Simple definition of "active"
+        if active_ideas:
+            contexto += "Ideias de Produto Ativas (Validadas, não Executadas):\n"
+            for idx, idea in enumerate(active_ideas[:3]): # Show top 3 for brevity
+                contexto += f"  - IP{idx+1}: {idea.descricao} (Autor: {idea.autor})\n"
+        else:
+            contexto += "Nenhuma ideia de produto ativa no momento.\n"
+
+        # Active Services (Validated or In Progress)
+        # historico_servicos is imported directly from ciclo_criativo
+        active_services = [s for s in historico_servicos if s.status in ["validated", "in_progress"]]
+        if active_services:
+            contexto += "Serviços Ativos (Validados ou Em Progresso):\n"
+            for idx, serv in enumerate(active_services[:3]): # Show top 3 for brevity
+                status_detail = f"(Status: {serv.status}"
+                if serv.status == "in_progress" and serv.assigned_agent_name:
+                    status_detail += f", Agente: {serv.assigned_agent_name}"
+                status_detail += ")"
+                contexto += f"  - SV{idx+1}: {serv.service_name} {status_detail}\n"
+        else:
+            contexto += "Nenhum serviço ativo no momento.\n"
+        contexto += "-------------------------\n"
+
+        # Service Assignment Instructions
+        servicos_para_atribuir = [s for s in historico_servicos if s.status == "validated"]
+        if servicos_para_atribuir:
+            instrucoes_base.append(
+                "4. 'assign_service' - atribuir um serviço validado a um agente. "
+                "Ex: {\"acao\": \"assign_service\", \"service_id\": \"<id_do_servico>\", \"agent_name\": \"<nome_do_agente>\"}"
+            )
+            contexto += "\nServiços Validados para Atribuição (lista detalhada no prompt anterior se aplicável):\n"
+            for s_idx, s in enumerate(servicos_para_atribuir[:3]): # Show top 3 for brevity in this specific section
+                contexto += (
+                    f"  - ID: {s.id[:8]}..., Nome: {s.service_name}\n" # Short ID
+                )
+
+            agentes_disponiveis_info = []
+            for ag_idx, ag_disp in enumerate(agentes.values()):
+                agentes_disponiveis_info.append(f"{ag_disp.nome} (Função: {ag_disp.funcao})")
+
+            if agentes_disponiveis_info:
+                 contexto += "Agentes Disponíveis para Atribuição (resumido):\n" + ", ".join(agentes_disponiveis_info[:5]) + "\n" # Top 5
+
+        # Task Proposal Instruction
+        instrucoes_base.append(
+            "5. 'propor_tarefa' - propor uma nova tarefa de alto nível para a empresa. "
+            "Ex: {\"acao\": \"propor_tarefa\", \"tarefa_descricao\": \"Expandir para o mercado de chatbots educacionais.\"}"
+        )
+
+    instrucoes = "\n".join(instrucoes_base)
     return f"{contexto}\n\n{instrucoes}"
 
 
@@ -791,17 +876,18 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
         return
 
     acao = dados.get("acao")
-    valid_actions = ["ficar", "mover", "mensagem"]
+    # Adicionar 'assign_service' e 'propor_tarefa' às ações válidas
+    valid_actions = ["ficar", "mover", "mensagem", "assign_service", "propor_tarefa"]
 
     if acao not in valid_actions:
         msg = f"Acao invalida ('{acao}') ou ausente na resposta do LLM para {agente.nome}. Resposta: {resposta}"
         registrar_evento(msg)
         logging.warning(msg)
         agente.registrar_acao(f"acao invalida '{acao}' -> falha", False)
-
+        # Fallback para 'ficar'
         acao_fallback_str = "ficar"
-        logging.warning(f"Fallback: {agente.nome} vai '{acao_fallback_str}' devido à ação inválida '{acao}'. Resposta original: {resposta}")
-        msg_ficar_direct = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback por ação '{acao}' inválida)."
+        logging.warning(f"Fallback: {agente.nome} vai '{acao_fallback_str}' devido à ação inválida '{acao}'.")
+        msg_ficar_direct = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'} (fallback por ação '{acao}' inválida)."
         registrar_evento(msg_ficar_direct)
         logging.info(msg_ficar_direct)
         agente.registrar_acao(f"{acao_fallback_str} (fallback acao) -> ok", True)
@@ -817,40 +903,40 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
         destinatario = dados.get("destinatario", "destinatário desconhecido")
         texto_msg = dados.get("texto", "")
         logging.info(f"{agente.nome} decidiu 'mensagem' para '{destinatario}' com texto: '{texto_msg[:50]}...'")
+    elif acao == "assign_service":
+        service_id = dados.get("service_id")
+        agent_name_to_assign = dados.get("agent_name")
+        logging.info(f"{agente.nome} (função: {agente.funcao}) decidiu 'assign_service' para service ID '{service_id}' ao agente '{agent_name_to_assign}'.")
+    elif acao == "propor_tarefa":
+        tarefa_desc = dados.get("tarefa_descricao", "Tarefa não especificada.")
+        logging.info(f"{agente.nome} (função: {agente.funcao}) decidiu 'propor_tarefa': '{tarefa_desc}'.")
 
 
+    # Execução da ação
     if acao == "ficar":
-        msg = f"{agente.nome} permanece em {agente.local_atual.nome}."
+        msg = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'}."
         registrar_evento(msg)
         logging.info(msg)
         agente.registrar_acao("ficar -> ok", True)
     elif acao == "mover":
         destino = dados.get("local")
         if not isinstance(destino, str) or not destino:
-            msg = (
-                f"Tentativa de mover {agente.nome} para destino inválido (ausente ou formato incorreto): {destino}."
-            )
+            # ... (fallback logic for mover)
+            msg = f"Tentativa de mover {agente.nome} para destino inválido: {destino}."
             registrar_evento(msg)
             logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
-            agente.registrar_acao(
-                f"mover para '{destino}' -> falha (destino invalido)", False
-            )
-
-            msg_ficar_fallback_mover = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mover' por destino inválido)."
+            agente.registrar_acao(f"mover para '{destino}' -> falha (destino invalido)", False)
+            msg_ficar_fallback_mover = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'} (fallback de 'mover' por destino inválido)."
             registrar_evento(msg_ficar_fallback_mover)
-            logging.info(msg_ficar_fallback_mover)
             agente.registrar_acao("ficar (fallback mover) -> ok", True)
         elif destino not in locais:
+            # ... (fallback logic for mover)
             msg = f"Destino {destino} não encontrado para {agente.nome}."
             registrar_evento(msg)
             logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
-            agente.registrar_acao(
-                f"mover para {destino} -> falha (local nao existe)", False
-            )
-
-            msg_ficar_fallback_local_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mover' - local '{destino}' inexistente)."
+            agente.registrar_acao(f"mover para {destino} -> falha (local nao existe)", False)
+            msg_ficar_fallback_local_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'} (fallback de 'mover' - local '{destino}' inexistente)."
             registrar_evento(msg_ficar_fallback_local_inexistente)
-            logging.info(msg_ficar_fallback_local_inexistente)
             agente.registrar_acao("ficar (fallback mover local) -> ok", True)
         else:
             mover_agente(agente.nome, destino)
@@ -861,41 +947,83 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
     elif acao == "mensagem":
         destinatario = dados.get("destinatario")
         texto = dados.get("texto")
-
-        if not isinstance(destinatario, str) or not destinatario or \
-           not isinstance(texto, str) or texto is None:
-            msg = f"Mensagem de {agente.nome} com destinatário ou texto inválido/ausente. Dest: '{destinatario}', Texto: '{texto}'."
+        if not isinstance(destinatario, str) or not destinatario or not isinstance(texto, str) or texto is None:
+            # ... (fallback logic for mensagem)
+            msg = f"Mensagem de {agente.nome} com destinatário ou texto inválido/ausente."
             registrar_evento(msg)
             logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
-            agente.registrar_acao(
-                f"mensagem para {destinatario} -> falha (dados invalidos)", False
-            )
-
-            msg_ficar_fallback_msg = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mensagem' por dados inválidos)."
+            agente.registrar_acao(f"mensagem para {destinatario} -> falha (dados invalidos)", False)
+            msg_ficar_fallback_msg = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'} (fallback de 'mensagem' por dados inválidos)."
             registrar_evento(msg_ficar_fallback_msg)
-            logging.info(msg_ficar_fallback_msg)
             agente.registrar_acao("ficar (fallback mensagem) -> ok", True)
         elif destinatario not in agentes:
+            # ... (fallback logic for mensagem)
             msg = f"Destinatário '{destinatario}' da mensagem de {agente.nome} não encontrado."
             registrar_evento(msg)
             logging.warning(f"{msg} Aplicando fallback: 'ficar'.")
-            agente.registrar_acao(
-                f"mensagem para {destinatario} -> falha (destinatario nao existe)",
-                False,
-            )
-
-            msg_ficar_fallback_msg_dest_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome} (fallback de 'mensagem' - destinatário '{destinatario}' inexistente)."
+            agente.registrar_acao(f"mensagem para {destinatario} -> falha (destinatario nao existe)", False)
+            msg_ficar_fallback_msg_dest_inexistente = f"{agente.nome} permanece em {agente.local_atual.nome if agente.local_atual else 'Local Desconhecido'} (fallback de 'mensagem' - destinatário '{destinatario}' inexistente)."
             registrar_evento(msg_ficar_fallback_msg_dest_inexistente)
-            logging.info(msg_ficar_fallback_msg_dest_inexistente)
             agente.registrar_acao("ficar (fallback msg dest) -> ok", True)
         else:
             msg = f"{agente.nome} envia mensagem para {destinatario}: {texto}"
             registrar_evento(msg)
-            logging.info(msg) # Log da ação de mensagem já informa os detalhes.
+            logging.info(msg)
             agente.historico_interacoes.append(f"para {destinatario}: {texto}")
             if len(agente.historico_interacoes) > 3:
                 agente.historico_interacoes = agente.historico_interacoes[-3:]
             agente.registrar_acao(f"mensagem para {destinatario} -> ok", True)
+
+    elif acao == "assign_service":
+        service_id = dados.get("service_id")
+        agent_name_to_assign = dados.get("agent_name")
+        service_to_assign = next((s for s in historico_servicos if s.id == service_id), None)
+        assignee_agent = agentes.get(agent_name_to_assign)
+
+        if not service_to_assign:
+            msg = f"Falha ao atribuir serviço: ID '{service_id}' não encontrado por {agente.nome}."
+            registrar_evento(msg)
+            logging.warning(msg)
+            agente.registrar_acao(f"assign_service {service_id} -> {agent_name_to_assign} -> falha (serviço não existe)", False)
+        elif not assignee_agent:
+            msg = f"Falha ao atribuir serviço '{service_to_assign.service_name}' por {agente.nome}: Agente '{agent_name_to_assign}' não encontrado."
+            registrar_evento(msg)
+            logging.warning(msg)
+            agente.registrar_acao(f"assign_service {service_id} -> {agent_name_to_assign} -> falha (agente não existe)", False)
+        elif service_to_assign.status != "validated":
+            msg = (f"Falha ao atribuir serviço '{service_to_assign.service_name}' a {agent_name_to_assign} por {agente.nome}: "
+                   f"Serviço com status '{service_to_assign.status}', esperado 'validated'.")
+            registrar_evento(msg)
+            logging.warning(msg)
+            agente.registrar_acao(f"assign_service {service_id} -> {agent_name_to_assign} -> falha (status inválido: {service_to_assign.status})", False)
+        else:
+            service_to_assign.assign_agent(assignee_agent.nome, message=f"Atribuído por {agente.nome}.")
+            msg = f"Serviço '{service_to_assign.service_name}' (ID: {service_id}) atribuído a {assignee_agent.nome} por {agente.nome}."
+            registrar_evento(msg)
+            logging.info(msg)
+            agente.registrar_acao(f"assign_service {service_id} -> {assignee_agent.nome} -> ok", True)
+            assignee_agent.objetivo_atual = f"Executar serviço: {service_to_assign.service_name} (ID: {service_id})"
+            registrar_evento(f"Objetivo de {assignee_agent.nome} atualizado para: {assignee_agent.objetivo_atual}")
+
+    elif acao == "propor_tarefa":
+        if agente.funcao.lower() == "ceo": # Sanity check: only CEO can do this
+            tarefa_descricao = dados.get("tarefa_descricao")
+            if tarefa_descricao and isinstance(tarefa_descricao, str) and tarefa_descricao.strip():
+                adicionar_tarefa(tarefa_descricao.strip())
+                msg = f"CEO {agente.nome} propôs nova tarefa: \"{tarefa_descricao.strip()}\"."
+                registrar_evento(msg)
+                logging.info(msg)
+                agente.registrar_acao(f"propôs tarefa: {tarefa_descricao.strip()} -> ok", True)
+            else:
+                msg = f"CEO {agente.nome} tentou propor tarefa, mas a descrição era inválida: '{tarefa_descricao}'."
+                registrar_evento(msg)
+                logging.warning(msg)
+                agente.registrar_acao(f"propor_tarefa -> falha (descrição inválida)", False)
+        else:
+            msg = f"Agente {agente.nome} (função {agente.funcao}) tentou propor tarefa, mas não é CEO. Ação ignorada."
+            registrar_evento(msg)
+            logging.warning(msg)
+            agente.registrar_acao(f"propor_tarefa -> falha (não autorizado)", False)
 
 
 # ---------------------------------------------------------------------------
@@ -915,15 +1043,12 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
     from rh import modulo_rh
-    # A importação de executar_ciclo_criativo é feita aqui para evitar importação circular no topo do arquivo,
-    # já que ciclo_criativo importa empresa_digital (ed).
-    # A definição de Ideia foi movida para core_types.py para quebrar a dependência circular de tipos.
-    # As funções salvar_historico_ideias e carregar_historico_ideias ainda são importadas de ciclo_criativo.
-    # Isso é aceitável, pois são chamadas de função, não dependências de tipo na definição de classes globais.
-    import ciclo_criativo as cc
+    # A importação de ciclo_criativo como cc já foi feita no topo do arquivo.
+    # A função cc.executar_ciclo_criativo() será chamada mais abaixo.
 
-    inicializar_automaticamente()
-    # Carregar dados salvos, se existirem, após a inicialização padrão (que pode criar defaults)
+    inicializar_automaticamente() # Cria agentes e locais default
+
+    # Carregar dados salvos, se existirem, após a inicialização padrão
     # ou antes, dependendo da lógica desejada (sobrescrever defaults com salvos).
     # Para este exemplo, vamos carregar após, o que significa que se os arquivos não existirem,
     # a inicialização automática prevalece. Se existirem, eles sobrescrevem.
@@ -936,12 +1061,16 @@ if __name__ == "__main__":
     save_file_agentes = "agentes_estado.json"
     save_file_locais = "locais_estado.json"
     save_file_ideias = "historico_ideias.json"
+    save_file_servicos = "servicos.json" # Novo arquivo de dados
 
     try:
-        carregar_dados(save_file_agentes, save_file_locais, save_file_ideias)
-        logger.info("Dados da simulação anterior carregados com sucesso.")
+        # Passar todos os nomes de arquivo para carregar_dados
+        carregar_dados(save_file_agentes, save_file_locais, save_file_ideias, save_file_servicos)
+        logger.info("Dados da simulação anterior (agentes, locais, ideias, serviços) carregados com sucesso.")
     except FileNotFoundError:
-        logger.info("Nenhum dado salvo encontrado. Iniciando com uma nova simulação.")
+        # Isso pode ser mais granular se quisermos saber qual arquivo específico não foi encontrado.
+        # Por enquanto, uma mensagem genérica é suficiente, pois carregar_historico_* já loga warnings.
+        logger.info("Um ou mais arquivos de dados não foram encontrados. Iniciando com estado padrão ou parcial.")
     except Exception as e:
         logger.error(f"Erro ao carregar dados salvos: {e}. Iniciando com uma nova simulação.")
 
@@ -993,14 +1122,50 @@ if __name__ == "__main__":
             executar_resposta(agente, resposta)
 
         # O cálculo de lucro e outras lógicas de fim de ciclo podem continuar considerando todos os agentes
-        # ou apenas os que interagiram, dependendo da lógica de negócio desejada.
-        # Por ora, mantemos como estava, afetando apenas quem toma decisão via LLM.
-        info = calcular_lucro_ciclo()
+        # --- SIMULAÇÃO DE ENTREGA DE SERVIÇO ---
+        # Esta lógica pode ser movida para uma função dedicada se ficar complexa.
+        # É executada uma vez por ciclo para todos os serviços em andamento.
+        current_sim_time = time.time() # Usar um tempo de simulação consistente se possível
+
+        # historico_servicos é importado diretamente de ciclo_criativo
+        for servico_obj in historico_servicos: # Renomeado para evitar conflito com módulo 'servico'
+            if servico_obj.status == "in_progress" and servico_obj.delivery_start_timestamp is not None:
+                # Lógica de conclusão baseada em tempo (placeholder)
+                # Esta lógica é um placeholder e precisa de um sistema de tempo de simulação mais robusto.
+                # Assumindo que estimated_effort_hours é em "ciclos" para simplificar por agora.
+                # Ou que um fator de conversão muito simples é aplicado.
+                # Para teste, vamos permitir que complete após alguns ciclos.
+                ciclos_desde_inicio = ciclo - getattr(servico_obj, '_start_cycle', ciclo) # _start_cycle precisaria ser definido na atribuição
+
+                # Simplificação extrema para demonstração:
+                # Se MODO_VIDA_INFINITA, completa mais rápido.
+                # Caso contrário, uma chance de completar.
+                chance_de_completar = 0.0
+                if MODO_VIDA_INFINITA and ciclos_desde_inicio >= 1: # Completa mais rápido em VI
+                    chance_de_completar = 0.75
+                elif ciclos_desde_inicio >= servico_obj.estimated_effort_hours / HOURS_PER_CYCLE_FACTOR : # Uma aproximação grosseira
+                    chance_de_completar = 0.5
+
+                if random.random() < chance_de_completar:
+                    servico_obj.complete_service(f"Concluído (simulação) no ciclo {ciclo}")
+                    registrar_evento(f"Serviço '{servico_obj.service_name}' (ID: {servico_obj.id}) concluído.")
+                    logging.info(f"Serviço '{servico_obj.service_name}' (ID: {servico_obj.id}) concluído.")
+                    # Remover objetivo do agente se o serviço atribuído foi concluído
+                    if servico_obj.assigned_agent_name and servico_obj.assigned_agent_name in agentes:
+                        agente_assignado = agentes[servico_obj.assigned_agent_name]
+                        if agente_assignado.objetivo_atual == f"Executar serviço: {servico_obj.service_name} (ID: {servico_obj.id})":
+                            agente_assignado.objetivo_atual = "Aguardando novas atribuições."
+                            registrar_evento(f"Objetivo de {agente_assignado.nome} resetado após conclusão do serviço.")
+
+
+        # Cálculo de lucro e outras lógicas de fim de ciclo
+        info = calcular_lucro_ciclo() # Agora deve incluir receita de serviços
         logging.info("Saldo apos ciclo %d: %.2f", ciclo, info["saldo"])
 
     # Salvar estado final da empresa
     try:
-        salvar_dados(save_file_agentes, save_file_locais, save_file_ideias)
-        logger.info("Estado da simulação salvo com sucesso.")
+        # salvar_dados já usa cc.salvar_historico_servicos internamente
+        salvar_dados(save_file_agentes, save_file_locais, save_file_ideias, save_file_servicos)
+        logger.info("Estado da simulação (agentes, locais, ideias, serviços) salvo com sucesso.")
     except Exception as e:
         logger.error(f"Erro ao salvar estado da simulação: {e}")

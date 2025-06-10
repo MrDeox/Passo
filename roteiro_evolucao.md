@@ -150,3 +150,115 @@ Este roteiro detalha as fases de evolução do projeto "Passo", transformando-o 
     *   Processos de marketing, vendas e entrega significativamente automatizados.
     *   Sistema demonstra capacidade de escalar as operações e a receita.
     *   A partir daqui, o foco é em otimização contínua, expansão de funcionalidades e exploração de novos nichos ou modelos de negócio.
+
+## Propostas de Melhorias Arquiteturais Futuras
+
+Esta seção delineia melhorias arquiteturais significativas para o Projeto Passo, visando maior robustez, escalabilidade e flexibilidade. Estas propostas são baseadas nas observações durante o desenvolvimento de funcionalidades como a oferta de `Serviços` e a delegação de tarefas pelo `CEO`.
+
+### 1. Abstração Unificada de `Offering` (Oferta)
+
+*   **Necessidade:** A introdução de `Serviços` ao lado de `Ideias` (que implicitamente representam produtos digitais) revelou duplicação conceitual e de código em seus ciclos de vida (proposta, validação, execução, cálculo de receita). Gerenciar múltiplos tipos de ofertas com lógicas separadas (ex: `historico_ideias`, `historico_servicos`, `propor_ideias`, `propor_servicos`) se tornará insustentável.
+*   **Proposta:**
+    *   Introduzir uma classe base abstrata ou interface chamada `Offering`.
+    *   Tipos específicos como `DigitalProductOffering` (evoluindo da atual `Ideia`), `ServiceOffering` (evoluindo da atual `Service`), e futuros como `SubscriptionOffering` ou `PhysicalProductOffering` herdariam de `Offering` ou implementariam sua interface.
+*   **Atributos Comuns Potenciais em `Offering`:**
+    *   `id: str` (identificador único)
+    *   `name: str` (nome da oferta)
+    *   `description: str` (descrição detalhada)
+    *   `status: str` (e.g., "proposed", "validated", "rejected", "active", "in_development", "completed", "retired", "on_hold") - um ciclo de vida mais granular e unificado.
+    *   `author_agent_id: str` (ID do agente que propôs)
+    *   `owner_agent_id: Optional[str]` (ID do agente responsável pela gestão/entrega)
+    *   `creation_timestamp: float`
+    *   `validation_timestamp: Optional[float]`
+    *   `activation_timestamp: Optional[float]` (quando se torna "vendável" ou "em progresso")
+    *   `completion_timestamp: Optional[float]` (para ofertas com fim definido)
+    *   `retirement_timestamp: Optional[float]` (quando deixa de ser oferecida)
+    *   `revenue_model: Dict` (e.g., `{"type": "fixed_price", "amount": 100.0}` ou `{"type": "hourly", "rate": 25.0, "estimated_hours": 10}`)
+    *   `cost_model: Dict` (para estimar Custo dos Bens Vendidos - COGS)
+    *   `history: List[Dict]` (log de mudanças de status e eventos importantes)
+*   **Métodos Comuns (ou a serem implementados por subclasses):**
+    *   `propose(agent_id, details)`
+    *   `validate(agent_id, validation_feedback)`
+    *   `activate(agent_id)`
+    *   `assign_owner(owner_agent_id)` (para ofertas que necessitam de um responsável pela entrega/gestão)
+    *   `update_progress(progress_details)` (para ofertas de longa duração)
+    *   `calculate_revenue_and_cost()` (baseado no `revenue_model` e `cost_model`)
+    *   `retire(agent_id)`
+*   **Impacto:** Simplificaria o gerenciamento de diferentes tipos de ofertas, unificaria o armazenamento (`historico_ofertas: List[Offering]`), e permitiria que módulos como o ciclo criativo, financeiro e de atribuição de tarefas operassem de forma mais genérica sobre as ofertas.
+
+### 2. Módulo Financeiro Avançado
+
+*   **Necessidade:** O atual `saldo` global é uma simplificação excessiva. Para tomar decisões de negócios informadas e simular uma empresa de forma mais realista, é preciso um rastreamento financeiro mais detalhado.
+*   **Proposta:**
+    *   **Plano de Contas (Chart of Accounts):** Definir categorias básicas de receitas e despesas (ex: Receita de Produtos Digitais, Receita de Serviços, Despesa com Salários, Despesa com Marketing, Custo de Ferramentas/APIs, COGS para Serviços).
+    *   **Rastreamento de Transações:** Registrar cada transação financeira com data, valor, tipo (receita/despesa), conta associada e referência à `Offering` ou agente/atividade relacionada.
+    *   **Orçamentos:** Permitir que o CEO ou agentes financeiros definam orçamentos para projetos ou departamentos.
+    *   **Relatórios Financeiros Básicos:** Capacidade de gerar demonstrativos simples como:
+        *   Demonstração de Resultados (P&L): Receitas - Despesas = Lucro/Prejuízo por período.
+        *   Fluxo de Caixa (Cash Flow): Entradas e saídas de caixa.
+*   **Integração:**
+    *   Quando uma `Offering` é concluída e sua receita é calculada, uma transação de receita seria registrada.
+    *   Custos de agentes (salários) seriam registrados periodicamente.
+    *   Ações de marketing ou uso de ferramentas pagas por agentes poderiam gerar transações de despesa.
+*   **Impacto:** Forneceria uma visão financeira muito mais rica, permitindo que os agentes (especialmente o CEO) tomem decisões estratégicas baseadas em lucratividade real por oferta, controle de custos e planejamento orçamentário.
+
+### 3. Simulação de Interação com Clientes
+
+*   **Necessidade:** Atualmente, a empresa opera em um vácuo, sem feedback externo ou demandas de clientes que impulsionem a inovação ou a prestação de serviços de forma realista.
+*   **Proposta:**
+    *   **Agentes Clientes Simulados (ou Eventos):** Introduzir "agentes clientes" (podem ser LLMs com personas simples) ou eventos simulados que:
+        *   Geram "inquéritos" sobre produtos/serviços.
+        *   Fornecem "feedback" sobre ofertas existentes.
+        *   Abrem "tickets de suporte" para problemas.
+        *   Solicitam "cotações" para novos serviços.
+    *   **Roteamento de Interações:**
+        *   Inquéritos de vendas poderiam ser roteados para agentes com função de "Vendas" ou para o `owner_agent_id` de uma `Offering`.
+        *   Tickets de suporte para agentes de "SuporteAoCliente".
+        *   Feedback agregado e analisado por agentes "AnalistaDeProduto" ou "AnalistaDeMercado".
+    *   **Resultados e Impacto no Sistema:**
+        *   A satisfação do cliente (simulada) pode se tornar uma métrica chave.
+        *   Feedback negativo pode gerar tarefas para melhorar uma `Offering` ou criar uma nova.
+        *   Tickets de suporte resolvidos podem aumentar a lealdade do cliente (simulada).
+        *   Solicitações de cotação podem iniciar o fluxo de proposta de uma nova `ServiceOffering`.
+*   **Impacto:** Tornaria a simulação mais dinâmica e orientada ao mercado, forçando a empresa a adaptar suas ofertas e operações com base em estímulos externos.
+
+### 4. Framework Básico de Gestão de Projetos
+
+*   **Necessidade:** Com a capacidade do CEO de propor tarefas e com ofertas mais complexas (especialmente serviços), a simples lista de `tarefas_pendentes` se tornará insuficiente. É preciso uma forma de agrupar tarefas relacionadas, atribuí-las e acompanhar seu progresso.
+*   **Proposta:**
+    *   **Objetos `Project`:**
+        *   Um `Project` poderia ser criado a partir de:
+            *   Uma `Offering` validada e ativada (ex: "Desenvolvimento do Produto X", "Entrega do Serviço Y para Cliente Z").
+            *   Uma tarefa estratégica de alto nível proposta pelo CEO (ex: "Pesquisa de Novo Mercado de IA").
+        *   Atributos: `id`, `name`, `description`, `status` (e.g., "novo", "planejado", "em_andamento", "concluído", "cancelado"), `owner_agent_id` (gerente do projeto), `linked_offering_id` (opcional), `prazo_simulado` (em ciclos/tempo da simulação).
+    *   **Sub-Tarefas dentro de Projetos:** Cada `Project` conteria uma lista de `Task` objects (evoluindo da atual string `tarefa_pendente`). Uma `Task` teria `id`, `description`, `status_task` (e.g., "a_fazer", "em_andamento", "concluida"), `assigned_agent_id`, `estimated_effort`.
+    *   **Atribuição e Colaboração:**
+        *   O `owner_agent_id` do projeto (ou o CEO) poderia criar e atribuir sub-tarefas aos agentes com as habilidades necessárias.
+        *   Agentes poderiam "reportar progresso" em suas tarefas, atualizando seu `status_task`.
+*   **Impacto:** Introduziria uma camada de gerenciamento operacional, permitindo que a empresa execute iniciativas mais complexas de forma organizada e rastreável. Melhoraria a coordenação entre agentes.
+
+### 5. Habilidades Dinâmicas de Agentes e Ferramentas
+
+*   **Necessidade:** As atuais "funções" dos agentes são rótulos estáticos. Para uma alocação de trabalho mais flexível e realista, e para permitir que os agentes usem capacidades específicas, um sistema mais dinâmico é necessário.
+*   **Proposta:**
+    *   **Habilidades de Agentes (`Agent.skills`):**
+        *   Cada agente teria uma lista de `skills: List[str]` (ex: `["python_programming", "seo_writing", "financial_analysis"]`) e, opcionalmente, um nível de proficiência.
+        *   A função principal ainda poderia existir como uma especialização primária.
+        *   O módulo de RH ou o próprio agente (via aprendizado simulado) poderia adicionar/melhorar habilidades.
+    *   **Registro de Ferramentas/Capacidades (`ToolRegistry`):**
+        *   Um registro central de "ferramentas" ou "capacidades" que os agentes podem usar. Exemplos:
+            *   `"gumroad_publish_tool(offering_id, details)"`
+            *   `"market_analysis_tool(query_params)"` (poderia interagir com APIs de SEO)
+            *   `"customer_communication_tool(customer_id, message_content)"`
+        *   Cada ferramenta teria uma descrição de seu propósito e como usá-la (parâmetros).
+    *   **Uso por LLMs:**
+        *   Os prompts dos agentes incluiriam uma lista de ferramentas/habilidades relevantes para seu objetivo atual.
+        *   A LLM poderia decidir "usar" uma ferramenta, retornando uma ação JSON específica como `{"acao": "usar_ferramenta", "nome_ferramenta": "gumroad_publish_tool", "parametros": {"offering_id": "xyz", ...}}`.
+        *   `executar_resposta` processaria essa ação, chamando a lógica da ferramenta correspondente.
+*   **Impacto:** Aumentaria drasticamente a flexibilidade e a capacidade da simulação. Agentes poderiam ser mais versáteis e a empresa poderia adquirir novas "capacidades" através da implementação de novas ferramentas, que os agentes então aprenderiam a usar.
+
+Estas melhorias arquiteturais, implementadas progressivamente, transformariam o Projeto Passo em uma simulação de negócios autônomos muito mais poderosa, flexível e com maior potencial para explorar cenários complexos de monetização e operação empresarial.The `roteiro_evolucao.md` file has been updated by appending the new "Propostas de Melhorias Arquiteturais Futuras" section with all the detailed points: Unified `Offering` Abstraction, Advanced Financial Module, Customer Interaction Simulation, Basic Project Management Framework, and Dynamic Agent Skills & Tooling.
+
+The content covers the requested areas, reflecting on the complexities encountered and proposing more generalized solutions for the future evolution of Projeto Passo.
+
+This completes all the steps for the current subtask.
