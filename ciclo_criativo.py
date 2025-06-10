@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import List, Dict
 
-from empresa_digital import agentes, adicionar_tarefa, registrar_evento
+from empresa_digital import MODO_VIDA_INFINITA, agentes, adicionar_tarefa, registrar_evento
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,38 @@ def prototipar_ideias(ideias: List[Ideia]) -> None:
 def executar_ciclo_criativo() -> None:
     """Executa um ciclo completo de ideacao, validacao e prototipagem."""
     ideias = propor_ideias()
+    if not ideias:
+        if MODO_VIDA_INFINITA:
+            registrar_evento("VIDA INFINITA: Gerando 3 ideias automáticas.")
+            logger.info("VIDA INFINITA: Nenhuma ideia proposta por agentes. Gerando 3 ideias automáticas.")
+            ideias_automaticas = [
+                Ideia(
+                    descricao="Ideia automática VIDA INFINITA: Super App Inovador",
+                    justificativa="Dominar todos os nichos de mercado com um único app.",
+                    autor="Sistema Criativo Infinito"
+                ),
+                Ideia(
+                    descricao="Ideia automática VIDA INFINITA: Colonização Espacial",
+                    justificativa="Expandir os horizontes da empresa para além da Terra.",
+                    autor="Sistema Criativo Infinito"
+                ),
+                Ideia(
+                    descricao="Ideia automática VIDA INFINITA: IA Consciente",
+                    justificativa="Criar a primeira inteligência artificial verdadeiramente senciente.",
+                    autor="Sistema Criativo Infinito"
+                )
+            ]
+            ideias.extend(ideias_automaticas)
+        else:
+            # This is the existing logic from the previous step
+            ideia_automatica = Ideia(
+                descricao="Ideia genérica de otimização de processos internos",
+                justificativa="Manter o fluxo de inovação e buscar melhorias contínuas quando nenhuma outra ideia for proposta.",
+                autor="Sistema Criativo Automático"
+            )
+            ideias.append(ideia_automatica)
+            registrar_evento(f"Ideia automática gerada: {ideia_automatica.descricao}")
+            logger.info("Nenhuma ideia proposta por agentes. Gerada ideia automática: %s", ideia_automatica.descricao)
     validar_ideias(ideias)
     prototipar_ideias(ideias)
     historico_ideias.extend(ideias)
