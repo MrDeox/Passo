@@ -11,11 +11,14 @@ Para executar o exemplo de uso basta rodar:
 python empresa_digital.py
 ```
 
-Ao ser executado o sistema **cria tudo sozinho**: salas, agentes, objetivos
-iniciais e tarefas são definidos automaticamente utilizando heurísticas que
-substituem o raciocínio de uma LLM. Nenhum input manual é necessário. O script
-apenas imprime as decisões tomadas e executa alguns ciclos para demonstrar a
-autonomia.
+Ao ser executado, o sistema inicializa a empresa (salas, agentes, objetivos
+iniciais e tarefas), com a configuração inicial de agentes podendo usar heurísticas
+para seleção de modelos LLM. Durante os ciclos de simulação, as decisões de cada
+agente são tomadas através de chamadas reais a Modelos de Linguagem (LLMs)
+configurados para cada agente, via API OpenRouter.
+É necessário configurar uma chave da API OpenRouter para que o sistema funcione
+(veja as seções "Inicializador Automático" ou "Testes Automatizados" para detalhes
+sobre como configurar a `OPENROUTER_API_KEY`).
 
 Cada agente mantém um histórico adaptativo contendo:
 
@@ -28,13 +31,17 @@ Cada agente mantém um histórico adaptativo contendo:
 Essas informações são incluídas no prompt gerado a cada ciclo, permitindo que a
 IA leve em conta a memória recente do agente.
 
-## Decisões via LLM
+## Decisões via LLM (Modelos de Linguagem Grandes)
 
-Cada agente pode ter sua próxima ação definida por um modelo de linguagem. A
-função `gerar_prompt_decisao` monta um texto com o contexto atual e pede que a
-IA escolha entre ficar na sala, mover-se para outro local ou mandar uma
-mensagem para algum colega. A resposta deve ser em JSON e é executada pelo
-sistema.
+A tomada de decisão de cada agente é impulsionada por um Modelo de Linguagem (LLM).
+A função `gerar_prompt_decisao` constrói um prompt detalhado com o contexto atual
+do agente (local, colegas, inventário, histórico de ações, objetivo, etc.).
+Este prompt é então enviado para o LLM configurado para o agente (no atributo `Agente.modelo_llm`)
+através da API OpenRouter (utilizando a função `chamar_openrouter_api`).
+A resposta do LLM, esperada em formato JSON, dita a próxima ação do agente
+(ficar, mover, ou enviar mensagem), que é então processada e executada pela função `executar_resposta`.
+Este processo permite que os agentes atuem de forma autônoma e dinâmica com base na
+interpretação do LLM sobre sua situação e objetivos.
 
 ### Exemplo de prompt
 
