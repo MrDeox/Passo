@@ -194,3 +194,6 @@ cython_debug/
 .cursorindexingignore
 dashboard/node_modules/
 .openrouter_key
+
+# Gumroad API Key
+.gumroad_key
