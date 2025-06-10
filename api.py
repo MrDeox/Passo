@@ -8,19 +8,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 ROOT = Path(__file__).parent
-KEY_FILE = ROOT / ".openrouter_key"
-
-
-def obter_api_key() -> str:
-    """Retorna a chave da OpenRouter de variavel de ambiente ou arquivo."""
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key.strip()
-    if KEY_FILE.exists():
-        key = KEY_FILE.read_text().strip()
-        os.environ["OPENROUTER_API_KEY"] = key
-        return key
-    raise RuntimeError("OPENROUTER_API_KEY nao definido")
 
 from empresa_digital import (
     Agente,
@@ -41,6 +28,10 @@ from empresa_digital import (
     salvar_dados,
     historico_eventos,
     registrar_evento,
+)
+from openrouter_utils import (
+    buscar_modelos_gratis,
+    escolher_modelo_llm,
 )
 from rh import modulo_rh
 from ciclo_criativo import executar_ciclo_criativo, historico_ideias
@@ -175,48 +166,13 @@ class ModeloEscolhido(BaseModel):
     raciocinio: str
 
 
-def _buscar_modelos_gratis() -> List[str]:
-    """Retorna todos os modelos gratuitos disponiveis na OpenRouter."""
-    key = obter_api_key()
-
-    url = "https://openrouter.ai/api/v1/models"
-    resp = requests.get(url, headers={"Authorization": f"Bearer {key}"}, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    return [m["id"] for m in data.get("data", []) if ":free" in m.get("id", "")]
-
-
-def _escolher_modelo(funcao: str, modelos: List[str]) -> Tuple[str, str]:
-    """Decide qual modelo usar de forma simplificada."""
-    f = funcao.lower()
-    # Heuristica simples para demonstracao, substitui uma chamada real a um LLM
-    if any(term in f for term in ["dev", "engenheiro", "developer"]):
-        for m in modelos:
-            if "deepseek" in m:
-                return (
-                    m,
-                    "Funcao tecnica detectada; modelo DeepSeek escolhido por ser otimizado para codigo.",
-                )
-    if any(term in f for term in ["ceo", "diretor", "gerente"]):
-        for m in modelos:
-            if "phi-4" in m or "llama" in m:
-                return (
-                    m,
-                    "Funcao gerencial; modelo avançado selecionado para apoio estrategico.",
-                )
-    return (
-        modelos[0] if modelos else "",
-        "Funcao generica; primeiro modelo gratuito utilizado.",
-    )
-
-
 # ---------------------------- Endpoints de agentes ----------------------------
 
 @app.get("/modelos-livres", response_model=List[str])
 def modelos_livres_endpoint():
     """Lista todos os modelos gratuitos retornados pela OpenRouter."""
     try:
-        return _buscar_modelos_gratis()
+        return buscar_modelos_gratis()
     except Exception as exc:
         logging.error("Erro ao buscar modelos: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -225,8 +181,8 @@ def modelos_livres_endpoint():
 @app.post("/agentes/escolher-modelo", response_model=ModeloEscolhido)
 def escolher_modelo_endpoint(dados: EscolherModeloIn):
     """Determina automaticamente o modelo de LLM para um novo agente."""
-    modelos = _buscar_modelos_gratis()
-    modelo, motivo = _escolher_modelo(dados.funcao, modelos)
+    modelos = buscar_modelos_gratis()
+    modelo, motivo = escolher_modelo_llm(dados.funcao, "", modelos)
     logging.info("Modelo %s escolhido para %s - %s", modelo, dados.nome, motivo)
     return ModeloEscolhido(modelo=modelo, raciocinio=motivo)
 

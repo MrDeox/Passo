@@ -20,6 +20,13 @@ def test_auto_initialization_creates_resources(reset_state):
     assert ed.agentes
     assert ed.tarefas_pendentes
 
+
+def test_model_selection_does_not_fail():
+    """Verifica se a selecao de modelo retorna um resultado e justificativa."""
+    modelo, rac = ed.selecionar_modelo("Dev")
+    assert modelo
+    assert rac
+
 def test_model_selection_heuristics():
     """Garante que a escolha do modelo LLM segue a heurística esperada."""
     assert ed.selecionar_modelo("Dev")[0] == "deepseek-chat"
@@ -237,3 +244,4 @@ def test_executar_resposta_scenarios(reset_state, resposta_llm, expected_action_
 #     ed.agentes.clear()
 #     ed.locais.clear()
 #     # ... etc.
+
