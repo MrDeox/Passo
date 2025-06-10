@@ -227,6 +227,7 @@ Para executar todos os testes:
 
 ```bash
 # instalar dependências do backend e o pytest
+# (o arquivo `requirements.txt` fixa o `httpx` na versão 0.23.x)
 pip install -r requirements.txt pytest
 
 # defina a chave da OpenRouter
@@ -239,6 +240,9 @@ export OPENROUTER_API_KEY=XXXX   # ou crie um arquivo .env com essa variável
 # rodar a suíte (é importante incluir o diretório raiz no PYTHONPATH)
 PYTHONPATH=. pytest -q
 ```
+
+O pacote `httpx` permanece travado na versão 0.23.x (menor que 0.24) para
+evitar problemas de compatibilidade durante os testes.
 
 O relatório exibirá quantos testes foram executados e possíveis falhas. Os testes
 estão organizados em:
