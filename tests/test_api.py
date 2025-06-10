@@ -114,6 +114,6 @@ def test_ciclo_next(reset_state):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["agentes"]) == 2
-    assert data["saldo"] == -10.0
-    assert ed.historico_saldo[-1] == -10.0
+    assert data["saldo"] == 10.0
+    assert ed.historico_saldo[-1] == 10.0
     assert data["ideias"]

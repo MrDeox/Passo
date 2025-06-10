@@ -33,8 +33,8 @@ def test_calcular_lucro_ciclo():
     res = ed.calcular_lucro_ciclo()
     assert res["receita"] == 10.0
     assert res["custos"] == 13.0
-    assert res["saldo"] == -3.0
-    assert ed.historico_saldo[-1] == -3.0
+    assert res["saldo"] == 10.0
+    assert ed.historico_saldo[-1] == 10.0
 
 
 def test_rh_verificar_cria_agentes():

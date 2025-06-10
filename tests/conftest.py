@@ -6,6 +6,7 @@ from ciclo_criativo import historico_ideias, preferencia_temas
 @pytest.fixture(autouse=True)
 def reset_state(monkeypatch):
     """Limpa variáveis globais antes e depois de cada teste."""
+    ed.MODO_VIDA_INFINITA = False
     ed.agentes.clear()
     ed.locais.clear()
     ed.tarefas_pendentes.clear()
@@ -20,6 +21,10 @@ def reset_state(monkeypatch):
         lambda: ["gpt-3.5-turbo"],
     )
     monkeypatch.setattr(
+        "openrouter_utils.obter_api_key",
+        lambda: "dummy",
+    )
+    monkeypatch.setattr(
         "openrouter_utils.escolher_modelo_llm",
         lambda funcao, objetivo, modelos: (modelos[0], "mock"),
     )
@@ -29,6 +34,7 @@ def reset_state(monkeypatch):
     monkeypatch.setattr(
         ed, "escolher_modelo_llm", lambda funcao, objetivo, modelos: (modelos[0], "mock")
     )
+    monkeypatch.setattr(ed, "obter_api_key", lambda: "dummy")
     yield
     ed.agentes.clear()
     ed.locais.clear()
@@ -39,3 +45,4 @@ def reset_state(monkeypatch):
     preferencia_temas.clear()
     rh.modulo_rh._contador = 1
     rh.saldo = ed.saldo
+    ed.MODO_VIDA_INFINITA = False

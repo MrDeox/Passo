@@ -8,13 +8,14 @@ Ele gerencia o estado da empresa, incluindo agentes, locais, finanças e
 o fluxo de eventos e decisões.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import json
 import logging
-import random # Adicionado para seleção aleatória de agentes
-import time # Adicionado para o backoff exponencial
-import requests # Adicionado para chamadas HTTP
+import random  # Adicionado para seleção aleatória de agentes
+import time  # Adicionado para o backoff exponencial
+import requests  # Adicionado para chamadas HTTP
 # import json # Já importado acima
 # import logging # Já importado acima
 # A funcao para buscar a API key deve vir de openrouter_utils para evitar
@@ -23,7 +24,8 @@ from openrouter_utils import obter_api_key
 
 logger = logging.getLogger(__name__)
 
-MODO_VIDA_INFINITA: bool = False # Default to False
+# Permite ativar o modo Vida Infinita via variavel de ambiente
+MODO_VIDA_INFINITA: bool = os.environ.get("MODO_VIDA_INFINITA", "0") == "1"
 
 def definir_modo_vida_infinita(ativo: bool) -> None:
     global MODO_VIDA_INFINITA

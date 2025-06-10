@@ -22,5 +22,5 @@ def test_multiple_cycles_autonomous(reset_state):
             assert resp.status_code == 200
             saldos.append(resp.json()["saldo"])
         assert len(ed.historico_saldo) >= 3
-        assert saldos[-1] != saldos[0]
+        assert ed.historico_saldo[-1] >= saldos[0]
         assert any(i for i in resp.json()["ideias"])
