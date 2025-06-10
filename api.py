@@ -63,7 +63,8 @@ from openrouter_utils import (
     escolher_modelo_llm,
 )
 from rh import modulo_rh
-from ciclo_criativo import executar_ciclo_criativo, historico_ideias
+from ciclo_criativo import executar_ciclo_criativo, historico_ideias, historico_servicos # Import historico_servicos
+from dataclasses import asdict # To convert Service dataclass to dict
 
 # Configuração de logging global
 logging.basicConfig(level=logging.INFO)
@@ -336,8 +337,28 @@ async def listar_eventos():
 @app.get("/lucro")
 async def obter_lucro():
     """Expõe o saldo acumulado e o histórico de lucro."""
+    # O `calcular_lucro_ciclo` retorna um dict mais detalhado,
+    # mas para este endpoint, manter a resposta simples pode ser ok,
+    # ou podemos expandi-la se necessário.
+    # Por ora, mantendo simples. O saldo é o mais importante aqui.
     return {"saldo": saldo, "historico_saldo": historico_saldo}
 
+
+# ------------------------------ Endpoints Serviços -----------------------------
+@app.get("/servicos")
+async def listar_servicos():
+    """Lista todos os serviços propostos e seu estado atual."""
+    # historico_servicos é importado de ciclo_criativo
+    # asdict é importado de dataclasses
+    return [asdict(s) for s in historico_servicos]
+
+@app.get("/servicos/{service_id}")
+async def obter_servico(service_id: str):
+    """Recupera um serviço específico pelo seu ID."""
+    servico_encontrado = next((s for s in historico_servicos if s.id == service_id), None)
+    if not servico_encontrado:
+        raise HTTPException(status_code=404, detail=f"Serviço com ID '{service_id}' não encontrado.")
+    return asdict(servico_encontrado)
 
 # ---------------------------- Controle da simulação ---------------------------
 @app.post("/ciclo/next")
@@ -360,16 +381,7 @@ async def proximo_ciclo():
         "saldo": lucro_info["saldo"],
         "historico_saldo": historico_saldo,
         "eventos": list(historico_eventos),
-        "ideias": [
-            {
-                "descricao": i.descricao,
-                "justificativa": i.justificativa,
-                "autor": i.autor,
-                "validada": i.validada,
-                "executada": i.executada,
-                "resultado": i.resultado,
-            }
-            for i in historico_ideias
-        ],
+        "ideias": [asdict(i) for i in historico_ideias], # Usar asdict para consistência
+        "servicos": [asdict(s) for s in historico_servicos],
     }
 

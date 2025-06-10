@@ -197,3 +197,9 @@ dashboard/node_modules/
 
 # Gumroad API Key
 .gumroad_key
+
+# Simulation data files
+agentes_estado.json
+locais_estado.json
+historico_ideias.json
+servicos.json
