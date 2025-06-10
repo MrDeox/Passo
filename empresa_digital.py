@@ -12,12 +12,22 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import json
 import logging
+import random # Adicionado para seleção aleatória de agentes
+import time # Adicionado para o backoff exponencial
 import requests # Adicionado para chamadas HTTP
 # import json # Já importado acima
 # import logging # Já importado acima
 # A funcao para buscar a API key deve vir de openrouter_utils para evitar
 # dependencias circulares com o modulo `api` utilizado nos testes e no backend.
 from openrouter_utils import obter_api_key
+
+# Configurable delay for OpenRouter API calls
+# Purpose: To control the request rate, avoid hitting rate limits, or for debugging.
+OPENROUTER_CALL_DELAY_SECONDS: float = 1.0
+
+# Maximum number of agents to process with LLM calls per cycle
+# Purpose: To manage API costs and processing time during simulation.
+MAX_LLM_AGENTS_PER_CYCLE: int = 5
 
 # ---------------------------- Lucro da empresa ----------------------------
 # Saldo acumulado da empresa ao longo da simulação. Cada ciclo soma receitas e
@@ -467,69 +477,129 @@ def chamar_openrouter_api(agente: Agente, prompt: str) -> str:
 
     Returns:
         A resposta textual do LLM (geralmente uma string JSON representando
-        a decisão do agente) ou uma string JSON de erro em caso de falha na
-        chamada da API ou processamento da resposta.
+        a decisão do agente) ou uma string JSON de erro em caso de falha.
+
+    Behavior:
+        - Applies a pre-call delay defined by `OPENROUTER_CALL_DELAY_SECONDS`.
+        - Implements a retry mechanism for API calls:
+            - Max retries: Defined by `MAX_RETRIES` (currently 3).
+            - Initial backoff delay: `INITIAL_BACKOFF_DELAY` (e.g., 1 second).
+            - Backoff strategy: Exponential (delay = initial_delay * 2^attempt).
+            - Retryable status codes: Defined in `RETRYABLE_STATUS_CODES` (e.g., 429, 500s).
+        - Logs errors and retry attempts.
+        - Returns JSON error messages for persistent failures or non-retryable issues.
 
     Raises:
-        Não lança exceções diretamente, mas retorna strings JSON de erro
-        em casos como falha na API, chave não encontrada, timeout, ou
-        estrutura de resposta inesperada. Erros são logados.
+        Não lança exceções diretamente, mas retorna strings JSON de erro.
     """
+    # Apply a fixed delay before every API call, configured globally.
+    # This helps in managing request rates and can be used for debugging.
+    time.sleep(OPENROUTER_CALL_DELAY_SECONDS)
+
     logging.debug(f"Iniciando chamada para OpenRouter API para o agente {agente.nome} com modelo {agente.modelo_llm}.")
     logging.debug(f"Prompt enviado para OpenRouter (modelo {agente.modelo_llm}):\n{prompt}")
 
-    try:
-        api_key = obter_api_key()
-        if not api_key:
-            logging.error("OPENROUTER_API_KEY não configurada.") # Mensagem mais clara
-            return json.dumps({"error": "API key not found", "details": "OpenRouter API key is missing or not configured."})
+    MAX_RETRIES = 3
+    INITIAL_BACKOFF_DELAY = 1  # segundos
+    RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": agente.modelo_llm,
-            "messages": [{"role": "user", "content": prompt}],
-        }
+    api_key = obter_api_key()
+    if not api_key:
+        logging.error("OPENROUTER_API_KEY não configurada.")
+        return json.dumps({"error": "API key not found", "details": "OpenRouter API key is missing or not configured."})
 
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        logging.debug(f"Resposta crua da OpenRouter (status {response.status_code}): {response.text}")
-        response.raise_for_status()
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": agente.modelo_llm,
+        "messages": [{"role": "user", "content": prompt}],
+    }
 
-        response_data = response.json()
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            logging.debug(f"Tentativa {attempt + 1}: Resposta crua da OpenRouter (status {response.status_code}): {response.text}")
 
-        # Extrai o conteúdo da mensagem do LLM
-        # Adicionado tratamento defensivo para diferentes estruturas de resposta
-        if response_data.get("choices") and \
-           isinstance(response_data["choices"], list) and \
-           len(response_data["choices"]) > 0 and \
-           response_data["choices"][0].get("message") and \
-           isinstance(response_data["choices"][0]["message"], dict) and \
-           response_data["choices"][0]["message"].get("content"):
-            content = response_data['choices'][0]['message']['content']
-            return content
-        else:
-            logging.error("Estrutura de resposta da API OpenRouter inesperada: %s", response_data) # Mantido logging.error
-            return json.dumps({"error": "Invalid response structure", "details": "Unexpected API response format."})
+            if response.status_code == 200:
+                response_data = response.json()
+                if response_data.get("choices") and \
+                   isinstance(response_data["choices"], list) and \
+                   len(response_data["choices"]) > 0 and \
+                   response_data["choices"][0].get("message") and \
+                   isinstance(response_data["choices"][0]["message"], dict) and \
+                   response_data["choices"][0]["message"].get("content"):
+                    content = response_data['choices'][0]['message']['content']
+                    return content
+                else:
+                    logging.error("Estrutura de resposta da API OpenRouter inesperada: %s", response_data)
+                    return json.dumps({"error": "Invalid response structure", "details": "Unexpected API response format."})
 
-    except requests.exceptions.Timeout as e:
-        logging.error("Timeout durante a chamada para a API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
-        return json.dumps({"error": "API call failed", "details": "Request timed out."})
-    except requests.exceptions.RequestException as e:
-        logging.error("Erro na chamada para a API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
-        return json.dumps({"error": "API call failed", "details": str(e)})
-    except json.JSONDecodeError as e: # Especificar JSONDecodeError para parsing da resposta da API
-        logging.error("Erro ao decodificar JSON da resposta da API OpenRouter para o agente %s: %s. Resposta: %s", agente.nome, e, response.text if 'response' in locals() else "N/A")
-        return json.dumps({"error": "API call failed", "details": "Invalid JSON response from API."})
-    except (KeyError, IndexError, TypeError) as e:
-        logging.error("Erro ao processar estrutura da resposta da API OpenRouter para o agente %s: %s", agente.nome, e) # Usar logging.error e incluir nome do agente
-        return json.dumps({"error": "Invalid response structure", "details": str(e)})
+            elif response.status_code in RETRYABLE_STATUS_CODES:
+                if attempt < MAX_RETRIES - 1:
+                    backoff_time = INITIAL_BACKOFF_DELAY * (2 ** attempt)
+                    logging.warning(
+                        f"Erro {response.status_code} na tentativa {attempt + 1} para o agente {agente.nome}. "
+                        f"Tentando novamente em {backoff_time} segundos..."
+                    )
+                    time.sleep(backoff_time)
+                    continue
+                else:
+                    logging.error(
+                        f"Erro {response.status_code} na API OpenRouter para o agente {agente.nome} após {MAX_RETRIES} tentativas. "
+                        f"Detalhes: {response.text}"
+                    )
+                    return json.dumps({"error": f"Erro na API OpenRouter: {response.status_code}", "details": response.text})
+            else:
+                # Erro não recuperável ou não previsto para retry
+                logging.error(
+                    f"Erro não recuperável {response.status_code} na API OpenRouter para o agente {agente.nome}. "
+                    f"Detalhes: {response.text}"
+                )
+                response.raise_for_status() # Isso vai levantar um HTTPError para ser pego pelo RequestException abaixo
+                # No caso de não levantar, retornamos o erro genérico.
+                return json.dumps({"error": f"Erro na API OpenRouter: {response.status_code}", "details": response.text})
+
+        except requests.exceptions.Timeout as e:
+            logging.error(f"Timeout na tentativa {attempt + 1} para a API OpenRouter (agente {agente.nome}): {e}")
+            if attempt < MAX_RETRIES - 1:
+                backoff_time = INITIAL_BACKOFF_DELAY * (2 ** attempt)
+                logging.info(f"Tentando novamente em {backoff_time} segundos...")
+                time.sleep(backoff_time)
+                continue
+            else:
+                logging.error(f"Timeout final após {MAX_RETRIES} tentativas para o agente {agente.nome}: {e}")
+                return json.dumps({"error": "API call failed", "details": "Request timed out after multiple retries."})
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Erro de requisição na tentativa {attempt + 1} para a API OpenRouter (agente {agente.nome}): {e}")
+            # Para erros de rede genéricos, podemos ou não querer tentar novamente.
+            # Por agora, vamos tentar novamente para qualquer RequestException que não seja Timeout.
+            if attempt < MAX_RETRIES - 1:
+                backoff_time = INITIAL_BACKOFF_DELAY * (2 ** attempt)
+                logging.info(f"Tentando novamente em {backoff_time} segundos...")
+                time.sleep(backoff_time)
+                continue
+            else:
+                logging.error(f"Erro final de requisição após {MAX_RETRIES} tentativas para o agente {agente.nome}: {e}")
+                return json.dumps({"error": "API call failed", "details": str(e)})
+        except json.JSONDecodeError as e:
+            # Este erro ocorre se a resposta (mesmo com status 200) não for JSON válido. Não é retryable.
+            logging.error(f"Erro ao decodificar JSON da resposta da API OpenRouter para o agente {agente.nome}: {e}. Resposta: {response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'}")
+            return json.dumps({"error": "API call failed", "details": "Invalid JSON response from API."})
+        except (KeyError, IndexError, TypeError) as e:
+            # Erro na estrutura da resposta JSON. Não é retryable.
+            logging.error(f"Erro ao processar estrutura da resposta da API OpenRouter para o agente {agente.nome}: {e}")
+            return json.dumps({"error": "Invalid response structure", "details": str(e)})
+
+    # Caso o loop termine sem retornar (o que não deveria acontecer com a lógica atual)
+    logging.error(f"A função chamar_openrouter_api terminou inesperadamente para o agente {agente.nome}.")
+    return json.dumps({"error": "API call failed", "details": "Unknown error after retries."})
 
 
 def enviar_para_llm(agente: Agente, prompt: str) -> str:
@@ -732,10 +802,29 @@ if __name__ == "__main__":
         logging.info("=== Ciclo %d ===", ciclo)
         modulo_rh.verificar()
         executar_ciclo_criativo()
-        for agente in list(agentes.values()):
+
+        # Selecionar um subconjunto de agentes para processamento LLM neste ciclo
+        # para gerenciar custos de API e tempo de processamento.
+        todos_os_agentes = list(agentes.values())
+        # Embaralhar a lista de agentes para garantir que diferentes agentes sejam escolhidos
+        # em ciclos diferentes, promovendo maior variedade nas interações.
+        random.shuffle(todos_os_agentes)
+        # Selecionar o número máximo de agentes definido por MAX_LLM_AGENTS_PER_CYCLE.
+        agentes_para_llm = todos_os_agentes[:MAX_LLM_AGENTS_PER_CYCLE]
+
+        logging.info(
+            f"Selecionados {len(agentes_para_llm)} de {len(todos_os_agentes)} agentes "
+            f"para processamento LLM neste ciclo (limite: {MAX_LLM_AGENTS_PER_CYCLE})."
+        )
+
+        for agente in agentes_para_llm: # Iterar apenas sobre o subconjunto selecionado.
             prompt = gerar_prompt_decisao(agente)
             resposta = enviar_para_llm(agente, prompt)
             executar_resposta(agente, resposta)
+
+        # O cálculo de lucro e outras lógicas de fim de ciclo podem continuar considerando todos os agentes
+        # ou apenas os que interagiram, dependendo da lógica de negócio desejada.
+        # Por ora, mantemos como estava, afetando apenas quem toma decisão via LLM.
         info = calcular_lucro_ciclo()
         logging.info("Saldo apos ciclo %d: %.2f", ciclo, info["saldo"])
 
