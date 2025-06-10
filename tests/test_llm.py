@@ -1,10 +1,11 @@
 import json
-from unittest.mock import patch, MagicMock
+import time # Adicionado para mockar time.sleep e testar delays
+from unittest.mock import patch, MagicMock, call # call para verificar chamadas a sleep
 import pytest # pytest é usado para fixtures como reset_state, mas patch é do unittest.mock
 import requests.exceptions
 
 import empresa_digital as ed
-from empresa_digital import Agente, Local # Importar classes para criar instâncias
+from empresa_digital import Agente, Local, OPENROUTER_CALL_DELAY_SECONDS # Importar classes e a constante de delay
 
 # Helper para criar um agente simples para testes
 def criar_agente_teste(nome="TestAgente", modelo="test-model"):
@@ -37,7 +38,10 @@ def test_model_selection_heuristics():
 # Testes para chamar_openrouter_api
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
-def test_chamar_openrouter_api_success(mock_post, mock_obter_key, reset_state):
+@patch('time.sleep', autospec=True) # Mock time.sleep
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0) # Set delay to 0 for this test
+def test_chamar_openrouter_api_success_first_attempt(mock_sleep, mock_post, mock_obter_key, reset_state):
+    """Test successful API call on the first attempt without retries."""
     agente = criar_agente_teste()
     prompt = "Test prompt"
 
@@ -50,6 +54,9 @@ def test_chamar_openrouter_api_success(mock_post, mock_obter_key, reset_state):
     result = ed.chamar_openrouter_api(agente, prompt)
 
     mock_post.assert_called_once()
+    # Assert that the initial delay sleep (which is 0 here due to patch) was called,
+    # but no other sleeps for backoff occurred.
+    mock_sleep.assert_called_once_with(0) # OPENROUTER_CALL_DELAY_SECONDS is patched to 0
     assert result == '{"acao": "ficar"}'
     mock_obter_key.assert_called_once()
 
@@ -67,70 +74,224 @@ def test_chamar_openrouter_api_no_key(mock_post, mock_obter_key, reset_state): #
     mock_post.assert_not_called() # Verify that requests.post was not called
 
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
-@patch('requests.post', side_effect=requests.exceptions.Timeout("API timed out"))
-def test_chamar_openrouter_api_timeout(mock_post, mock_obter_key, reset_state):
+@patch('requests.post')
+@patch('time.sleep', autospec=True)
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0) # Disable fixed delay for this test
+def test_chamar_openrouter_api_timeout_with_retry_success(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """Test that a Timeout exception triggers a retry and can succeed."""
     agente = criar_agente_teste()
-    prompt = "Test prompt"
+    prompt = "Test prompt for timeout retry"
+
+    successful_response = MagicMock()
+    successful_response.status_code = 200
+    successful_response.json.return_value = {"choices": [{"message": {"content": '{"acao": "timeout_success"}'}}]}
+    successful_response.text = json.dumps(successful_response.json.return_value)
+
+    # First call raises Timeout, second call is successful
+    mock_requests_post.side_effect = [
+        requests.exceptions.Timeout("API timed out on first attempt"),
+        successful_response
+    ]
 
     result = ed.chamar_openrouter_api(agente, prompt)
 
-    expected_error = {"error": "API call failed", "details": "Request timed out."}
-    assert json.loads(result) == expected_error
-    mock_post.assert_called_once()
+    assert mock_requests_post.call_count == 2
+    # First call to sleep is the OPENROUTER_CALL_DELAY_SECONDS (0), second is the backoff
+    expected_sleep_calls = [
+        call(0),  # Initial delay from OPENROUTER_CALL_DELAY_SECONDS = 0
+        call(1)   # INITIAL_BACKOFF_DELAY = 1 second for the first retry
+    ]
+    mock_time_sleep.assert_has_calls(expected_sleep_calls)
+
+    assert result == '{"acao": "timeout_success"}'
+    mock_obter_key.assert_called_once() # API key should still be obtained only once
+
 
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
-def test_chamar_openrouter_api_invalid_json_response(mock_post, mock_obter_key, reset_state):
+@patch('time.sleep', autospec=True)
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+def test_chamar_openrouter_api_retry_on_specific_codes_then_success(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """Test retry on specified error codes (429) and eventual success."""
     agente = criar_agente_teste()
-    prompt = "Test prompt"
+    prompt = "Test prompt for 429 retry"
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.text = "Esto no es JSON"
-    mock_response.json.side_effect = json.JSONDecodeError("Error", "doc", 0)
-    mock_post.return_value = mock_response
+    error_response_429 = MagicMock()
+    error_response_429.status_code = 429
+    error_response_429.text = '{"error": "Too Many Requests"}'
+
+    successful_response = MagicMock()
+    successful_response.status_code = 200
+    successful_response.json.return_value = {"choices": [{"message": {"content": '{"acao": "retry_success"}'}}]}
+    successful_response.text = json.dumps(successful_response.json.return_value)
+
+    mock_requests_post.side_effect = [error_response_429, successful_response]
 
     result = ed.chamar_openrouter_api(agente, prompt)
 
-    expected_error = {"error": "API call failed", "details": "Invalid JSON response from API."}
-    assert json.loads(result) == expected_error
+    assert mock_requests_post.call_count == 2
+    expected_sleep_calls = [call(0), call(1)] # Initial delay (0) + 1s backoff
+    mock_time_sleep.assert_has_calls(expected_sleep_calls)
+    assert result == '{"acao": "retry_success"}'
+    mock_obter_key.assert_called_once()
+
 
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
-def test_chamar_openrouter_api_unexpected_structure(mock_post, mock_obter_key, reset_state):
+@patch('time.sleep', autospec=True)
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+def test_chamar_openrouter_api_exhaust_retries(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """Test that API call fails after exhausting all retries on a retryable error."""
     agente = criar_agente_teste()
-    prompt = "Test prompt"
+    prompt = "Test prompt for exhausting retries"
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    # Resposta com estrutura inesperada (e.g. faltando 'message')
-    unexpected_payload = {"choices": [{"something_else": {"content": '{"acao": "ficar"}'}}]}
-    mock_response.json.return_value = unexpected_payload
-    mock_response.text = json.dumps(unexpected_payload)
-    mock_post.return_value = mock_response
+    error_response_500 = MagicMock()
+    error_response_500.status_code = 500
+    error_response_500.text = '{"error": "Internal Server Error"}'
+    # raise_for_status for 500 should be implicitly handled if not 200 or other retryable
+    # however, our code explicitly checks for retryable status codes.
+
+    mock_requests_post.side_effect = [error_response_500, error_response_500, error_response_500] # MAX_RETRIES = 3
 
     result = ed.chamar_openrouter_api(agente, prompt)
 
-    loaded_result = json.loads(result)
-    assert loaded_result["error"] == "Invalid response structure"
+    assert mock_requests_post.call_count == 3 # Called MAX_RETRIES times
+    expected_sleep_calls = [
+        call(0),  # Initial delay (0)
+        call(1),  # 1st backoff: 1 * (2**0) = 1s
+        call(2)   # 2nd backoff: 1 * (2**1) = 2s
+    ]
+    mock_time_sleep.assert_has_calls(expected_sleep_calls)
+
+    expected_error_payload = {"error": "Erro na API OpenRouter: 500", "details": '{"error": "Internal Server Error"}'}
+    assert json.loads(result) == expected_error_payload
+    mock_obter_key.assert_called_once()
+
+
+@patch('empresa_digital.obter_api_key', return_value="fake_api_key")
+@patch('requests.post')
+@patch('time.sleep', autospec=True)
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+def test_chamar_openrouter_api_no_retry_on_non_retryable_code(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """Test that non-retryable error codes (e.g., 400) are not retried."""
+    agente = criar_agente_teste()
+    prompt = "Test prompt for non-retryable error"
+
+    error_response_400 = MagicMock()
+    error_response_400.status_code = 400
+    error_response_400.text = '{"error": "Bad Request"}'
+    # For non-retryable client errors that are not 429, raise_for_status() would typically be called.
+    # Our function calls it if status is not 200 and not in RETRYABLE_STATUS_CODES.
+    error_response_400.raise_for_status.side_effect = requests.exceptions.HTTPError("Bad Request")
+    mock_requests_post.return_value = error_response_400
+
+    result = ed.chamar_openrouter_api(agente, prompt)
+
+    mock_requests_post.assert_called_once()
+    # Only the initial delay sleep should be called
+    mock_time_sleep.assert_called_once_with(0)
+
+    # The error is caught by the generic RequestException handler after raise_for_status
+    expected_error_payload = {"error": "API call failed", "details": "Bad Request"}
+    assert json.loads(result) == expected_error_payload
+    mock_obter_key.assert_called_once()
+
+
+@patch('empresa_digital.obter_api_key', return_value="fake_api_key")
+@patch('requests.post')
+@patch('time.sleep', autospec=True)
+def test_chamar_openrouter_api_fixed_call_delay_applied(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """Test that OPENROUTER_CALL_DELAY_SECONDS is applied."""
+    # Temporarily set the delay to a non-zero value for this test
+    with patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0.1):
+        agente = criar_agente_teste()
+        prompt = "Test prompt for fixed delay"
+
+        successful_response = MagicMock()
+        successful_response.status_code = 200
+        successful_response.json.return_value = {"choices": [{"message": {"content": '{"acao": "delay_test_success"}'}}]}
+        successful_response.text = json.dumps(successful_response.json.return_value)
+        mock_requests_post.return_value = successful_response
+
+        result = ed.chamar_openrouter_api(agente, prompt)
+
+        mock_requests_post.assert_called_once()
+        # The first call to sleep should be the fixed delay
+        mock_time_sleep.assert_called_once_with(0.1)
+        assert result == '{"acao": "delay_test_success"}'
+        mock_obter_key.assert_called_once()
+
+
+@patch('empresa_digital.obter_api_key', return_value="fake_api_key")
+@patch('requests.post')
+def test_chamar_openrouter_api_invalid_json_response(mock_requests_post, mock_obter_key, reset_state):
+    # This test is largely the same, but ensure it doesn't conflict with retry logic for sleep calls
+    # by also patching OPENROUTER_CALL_DELAY_SECONDS to 0 and time.sleep.
+    with patch('time.sleep', autospec=True) as mock_time_sleep, \
+         patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0):
+        agente = criar_agente_teste()
+        prompt = "Test prompt"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "Esto no es JSON"
+        mock_response.json.side_effect = json.JSONDecodeError("Error", "doc", 0)
+        mock_requests_post.return_value = mock_response
+
+        result = ed.chamar_openrouter_api(agente, prompt)
+
+        expected_error = {"error": "API call failed", "details": "Invalid JSON response from API."}
+        assert json.loads(result) == expected_error
+        mock_time_sleep.assert_called_once_with(0) # Ensure initial delay sleep was called
+
+@patch('empresa_digital.obter_api_key', return_value="fake_api_key")
+@patch('requests.post')
+def test_chamar_openrouter_api_unexpected_structure(mock_requests_post, mock_obter_key, reset_state):
+    # Similar to above, ensure this test is also robust to sleep calls by patching them.
+    with patch('time.sleep', autospec=True) as mock_time_sleep, \
+         patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0):
+        agente = criar_agente_teste()
+        prompt = "Test prompt"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        # Resposta com estrutura inesperada (e.g. faltando 'message')
+        unexpected_payload = {"choices": [{"something_else": {"content": '{"acao": "ficar"}'}}]}
+        mock_response.json.return_value = unexpected_payload
+        mock_response.text = json.dumps(unexpected_payload)
+        mock_requests_post.return_value = mock_response
+
+        result = ed.chamar_openrouter_api(agente, prompt)
+
+        loaded_result = json.loads(result)
+        assert loaded_result["error"] == "Invalid response structure"
+        mock_time_sleep.assert_called_once_with(0) # Ensure initial delay sleep was called
     # O detalhe da exceção pode variar, então verificamos apenas a chave de erro principal
 
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
-def test_chamar_openrouter_api_http_error(mock_post, mock_obter_key, reset_state):
+# Patched time.sleep and OPENROUTER_CALL_DELAY_SECONDS as this is a non-retryable error test
+@patch('time.sleep', autospec=True)
+@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+def test_chamar_openrouter_api_http_error_non_retryable_401(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
+    """ Test a specific non-retryable HTTP error like 401. """
     agente = criar_agente_teste()
-    prompt = "Test prompt"
+    prompt = "Test prompt for 401 error"
 
     mock_response = MagicMock()
-    mock_response.status_code = 401 # Unauthorized
-    mock_response.text = '{"error": "Unauthorized"}'
-    mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("Unauthorized")
-    mock_post.return_value = mock_response
+    mock_response.status_code = 401 # Unauthorized - non-retryable
+    mock_response.text = '{"error": "Unauthorized key"}'
+    mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("Unauthorized key")
+    mock_requests_post.return_value = mock_response
 
     result = ed.chamar_openrouter_api(agente, prompt)
+
+    mock_requests_post.assert_called_once()
+    mock_time_sleep.assert_called_once_with(0) # Only initial delay sleep
+
     loaded_result = json.loads(result)
-    assert loaded_result["error"] == "API call failed"
-    assert "Unauthorized" in loaded_result["details"]
+    assert loaded_result["error"] == "API call failed" # This is the generic wrapper for RequestException
+    assert "Unauthorized key" in loaded_result["details"]
 
 
 # Testes para enviar_para_llm
