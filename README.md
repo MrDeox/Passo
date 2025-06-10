@@ -11,9 +11,10 @@ Para executar o exemplo de uso basta rodar:
 python empresa_digital.py
 ```
 
-Ao ser executado o sistema **cria tudo sozinho**: salas, agentes, objetivos
-iniciais e tarefas são definidos automaticamente utilizando heurísticas que
-substituem o raciocínio de uma LLM. Nenhum input manual é necessário. O script
+Ao ser executado o sistema **cria tudo sozinho**: salas, agentes e objetivos
+iniciais surgem automaticamente. A escolha do modelo LLM de cada agente é
+decidida em tempo real por uma LLM que analisa a função do agente e a lista de
+modelos gratuitos da OpenRouter. Nenhum input manual é necessário. O script
 apenas imprime as decisões tomadas e executa alguns ciclos para demonstrar a
 autonomia.
 
@@ -35,6 +36,11 @@ função `gerar_prompt_decisao` monta um texto com o contexto atual e pede que a
 IA escolha entre ficar na sala, mover-se para outro local ou mandar uma
 mensagem para algum colega. A resposta deve ser em JSON e é executada pelo
 sistema.
+
+Na criação de cada agente o sistema consulta a lista de modelos gratuitos
+disponíveis na OpenRouter e envia essas opções para uma LLM real decidir qual é
+o mais adequado para a função e objetivo do agente. O raciocínio e o modelo
+escolhido são registrados no log, permitindo auditoria posterior.
 
 ### Exemplo de prompt
 
@@ -248,7 +254,7 @@ O relatório exibirá quantos testes foram executados e possíveis falhas. Os te
 estão organizados em:
 
 - `tests/test_core.py` e `tests/test_llm.py` – verificações unitárias das funções
-  principais e da heurística de seleção de modelos.
+  principais e do processo de seleção automática de modelos.
 - `tests/test_integration.py`, `tests/test_simulation.py` e `tests/test_rh_auto.py`
   – integração entre módulos como RH, ciclo criativo e cálculo de lucro.
 - `tests/test_end_to_end.py` e `tests/test_frontend_api.py` – simulam a

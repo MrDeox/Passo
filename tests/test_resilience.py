@@ -9,7 +9,9 @@ def test_modelos_livres_error_logging(monkeypatch):
     """Simula falha ao buscar modelos e checa se a API responde com erro."""
     def fail(*_, **__):
         raise RuntimeError("falha")
-    monkeypatch.setattr(api, "_buscar_modelos_gratis", fail)
+    monkeypatch.setattr(
+        api, "buscar_modelos_gratis", fail, raising=False
+    )
     client = TestClient(api.app)
     resp = client.get("/modelos-livres")
     assert resp.status_code == 500

@@ -103,20 +103,18 @@ class Agente:
 # Lógica autônoma de inicialização e escolha de modelos
 # ---------------------------------------------------------------------------
 
-def selecionar_modelo(funcao: str) -> Tuple[str, str]:
-    """Define automaticamente o modelo de linguagem ideal.
+from openrouter_utils import buscar_modelos_gratis, escolher_modelo_llm
 
-    Uma heurística simples substitui o raciocínio de uma LLM real. Retorna o
-    modelo escolhido e a justificativa para registro em log.
-    """
 
-    base = ["gpt-3.5-turbo", "deepseek-chat", "phi-4:free", "llama3-8b:free"]
-    f = funcao.lower()
-    if any(t in f for t in ["dev", "engenheiro", "developer"]):
-        return "deepseek-chat", "Função técnica; modelo otimizado para código."
-    if any(t in f for t in ["ceo", "diretor", "gerente"]):
-        return "phi-4:free", "Função gerencial; modelo estratégico."
-    return base[0], "Função genérica; modelo padrão adotado."
+def selecionar_modelo(funcao: str, objetivo: str = "") -> Tuple[str, str]:
+    """Escolhe dinamicamente o modelo de linguagem para um agente."""
+
+    modelos = buscar_modelos_gratis()
+    modelo, raciocinio = escolher_modelo_llm(funcao, objetivo, modelos)
+    logging.info(
+        "Modelo %s escolhido para funcao %s - %s", modelo, funcao, raciocinio
+    )
+    return modelo, raciocinio
 
 
 def _decidir_salas_iniciais() -> List[Tuple[str, str, List[str]]]:
@@ -142,7 +140,7 @@ def _decidir_agentes_iniciais() -> List[Tuple[str, str, str, str, str]]:
     ]
     agentes_cfg = []
     for nome, funcao, sala, objetivo in configuracoes:
-        modelo, motivo = selecionar_modelo(funcao)
+        modelo, motivo = selecionar_modelo(funcao, objetivo)
         logging.info(
             "Modelo %s escolhido para %s (%s) - %s",
             modelo,

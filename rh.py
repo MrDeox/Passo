@@ -89,7 +89,7 @@ class ModuloRH:
             primeiro_local = next(iter(locais.values()), None)
             if primeiro_local:
                 nome = self._novo_nome()
-                modelo, motivo = selecionar_modelo("Executor")
+                modelo, motivo = selecionar_modelo("Executor", tarefa)
                 criar_agente(
                     nome,
                     "Executor",
