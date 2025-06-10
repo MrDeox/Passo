@@ -7,12 +7,12 @@ there is available balance and unmet demand or pending tasks.
 import logging
 from typing import Dict
 
+import empresa_digital as ed
 from empresa_digital import (
     agentes,
     locais,
     criar_agente,
     tarefas_pendentes,
-    saldo,
     selecionar_modelo,
     registrar_evento,
 )
@@ -36,7 +36,8 @@ class ModuloRH:
 
     def verificar(self) -> None:
         """Verifica carencias e contrata novos agentes se necessario."""
-        if saldo <= 0:
+        # Usa o saldo atual do modulo principal para decidir sobre contratações
+        if ed.saldo <= 0:
             logger.info("Saldo insuficiente, nenhuma contratacao realizada")
             registrar_evento("RH: saldo insuficiente para contratar")
             return
@@ -44,7 +45,7 @@ class ModuloRH:
         contratou = False
 
         # Verifica cada sala com carencia de agentes
-        for local in locais.values():
+        for local in sorted(locais.values(), key=lambda l: l.nome):
             if len(local.agentes_presentes) < self.min_por_sala and tarefas_pendentes:
                 nome = self._novo_nome()
                 modelo, motivo = selecionar_modelo("Funcionario")
@@ -66,7 +67,7 @@ class ModuloRH:
         for funcao, qtd in contagem_funcao.items():
             if qtd < self.min_por_funcao and tarefas_pendentes:
                 nome = self._novo_nome()
-                primeiro_local = next(iter(locais.values()), None)
+                primeiro_local = min(locais.values(), key=lambda l: l.nome, default=None)
                 if primeiro_local:
                     modelo, motivo = selecionar_modelo(funcao)
                     criar_agente(nome, funcao, modelo, primeiro_local.nome)
@@ -86,7 +87,7 @@ class ModuloRH:
         # Cria agentes para tarefas pendentes
         while tarefas_pendentes:
             tarefa = tarefas_pendentes.pop(0)
-            primeiro_local = next(iter(locais.values()), None)
+            primeiro_local = min(locais.values(), key=lambda l: l.nome, default=None)
             if primeiro_local:
                 nome = self._novo_nome()
                 modelo, motivo = selecionar_modelo("Executor", tarefa)

@@ -9,6 +9,35 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).parent
 
+
+class _KeyFile:
+    """Wrapper com metodos patchaveis para o arquivo de API key."""
+
+    def __init__(self, path: Path):
+        self.path = path
+
+    def exists(self) -> bool:
+        return self.path.exists()
+
+    def read_text(self) -> str:
+        return self.path.read_text()
+
+
+KEY_FILE = _KeyFile(ROOT / ".openrouter_key")
+
+
+def obter_api_key() -> str:
+    """Retorna a chave da OpenRouter da variável de ambiente ou arquivo."""
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key.strip()
+    if KEY_FILE.exists():
+        key = KEY_FILE.read_text().strip()
+        os.environ["OPENROUTER_API_KEY"] = key
+        return key
+    raise RuntimeError("OPENROUTER_API_KEY nao definido")
+
+
 from empresa_digital import (
     Agente,
     Local,
