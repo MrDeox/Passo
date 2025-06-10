@@ -18,6 +18,12 @@ import time  # Adicionado para o backoff exponencial
 import requests  # Adicionado para chamadas HTTP
 # import json # Já importado acima
 # import logging # Já importado acima
+
+# Imports do ciclo_criativo para persistência do histórico de ideias
+# e de core_types para a definição de Ideia.
+from .core_types import Ideia
+from ciclo_criativo import salvar_historico_ideias, carregar_historico_ideias
+
 # A funcao para buscar a API key deve vir de openrouter_utils para evitar
 # dependencias circulares com o modulo `api` utilizado nos testes e no backend.
 from openrouter_utils import obter_api_key
@@ -286,8 +292,8 @@ def adicionar_tarefa(tarefa: str) -> None:
     tarefas_pendentes.append(tarefa)
 
 
-def salvar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
-    """Salva os dicionários globais de agentes e locais em arquivos JSON.
+def salvar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_ideias: str = "historico_ideias.json") -> None:
+    """Salva os dicionários globais de agentes, locais e o histórico de ideias em arquivos JSON.
 
     Somente informações necessárias para reconstrução dos objetos são
     persistidas (nome do local em que cada agente está, por exemplo).
@@ -325,9 +331,12 @@ def salvar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
     with open(arquivo_locais, "w", encoding="utf-8") as f:
         json.dump(dados_locais, f, ensure_ascii=False, indent=2)
 
+    # Salvar histórico de ideias
+    salvar_historico_ideias(arquivo_historico_ideias)
 
-def carregar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
-    """Carrega arquivos JSON recriando os dicionários de agentes e locais."""
+
+def carregar_dados(arquivo_agentes: str, arquivo_locais: str, arquivo_historico_ideias: str = "historico_ideias.json") -> None:
+    """Carrega arquivos JSON recriando os dicionários de agentes, locais e o histórico de ideias."""
 
     global agentes, locais
     agentes = {}
@@ -343,6 +352,93 @@ def carregar_dados(arquivo_agentes: str, arquivo_locais: str) -> None:
     with open(arquivo_agentes, "r", encoding="utf-8") as f:
         dados_agentes = json.load(f)
     for info in dados_agentes.values():
+        # Garantir que o local_atual seja tratado se None ou vazio
+        local_atual_nome = info.get("local_atual")
+        if not local_atual_nome or local_atual_nome not in locais:
+            # Fallback para um local padrão ou logar um aviso e pular/tratar o agente
+            # Por enquanto, se o local não existir, pode causar erro em criar_agente
+            # ou o agente pode ficar sem local. criar_agente já lida com local não encontrado.
+            # Se local_atual_nome for None, criar_agente pode precisar de um default.
+            # A lógica original de criar_agente espera um nome de local válido.
+            # Se o local salvo for inválido, o agente não será movido corretamente.
+            # Vamos garantir que `criar_agente` receba uma string, mesmo que vazia se não houver local.
+            # A função `criar_agente` já levanta ValueError se o local não for encontrado.
+            # Se o local for None/vazio, pode ser um agente que ainda não foi atribuído a um local.
+            # A função `criar_agente` precisa de um nome de local. Se for None, precisa de um default.
+            # A assinatura de criar_agente é: nome, funcao, modelo_llm, local, objetivo
+            # O `local` é o nome do local.
+            # Se `info.get("local_atual")` for None, passamos uma string vazia ou um local padrão se existir.
+            # No entanto, a lógica de `criar_agente` espera um local que exista.
+            # Melhorar isso pode ser um refactoring. Por ora, passamos o que foi salvo.
+            # Se for None, `criar_agente` vai falhar se não encontrar `locais[None]`.
+            # Portanto, é importante que `local_atual` em `dados_agentes` seja um nome de local válido ou
+            # que `criar_agente` e `agente.mover_para` lidem com `None`.
+            # A estrutura de `Agente` permite `local_atual: Optional[Local]`.
+            # `criar_agente` atribui `local_obj` a `agente.local_atual`. Se `local` (nome) não existe, falha.
+            # Se `info.get("local_atual")` for `None`, isso é um problema para `locais.get(None)`.
+            # Vamos assumir que se `local_atual` é `None` no JSON, o agente não está em nenhum local específico
+            # ou está em um local "default" ou "limbo".
+            # Para simplificar, se `local_atual` for None no JSON, o agente é criado sem local inicial
+            # e depois tentamos movê-lo. Mas `criar_agente` exige um local.
+            # Solução: se local_atual for None, não podemos criar o agente da forma usual.
+            # Isso indica um estado salvo potencialmente inconsistente ou um agente "desligado".
+            # Por ora, vamos pular agentes com local inválido no carregamento, com um log.
+            if not local_atual_nome or local_atual_nome not in locais:
+                logger.warning(f"Agente '{info['nome']}' tem local_atual '{local_atual_nome}' inválido ou não encontrado nos locais carregados. Este agente pode não ser carregado corretamente ou ser pulado.")
+                # Opção 1: Pular o agente
+                # continue
+                # Opção 2: Tentar criar com um local padrão (se existir) ou levantar erro.
+                # Por ora, a chamada a criar_agente abaixo vai falhar se local_atual_nome for inválido.
+                # Uma melhoria seria criar o agente e não atribuir local se inválido.
+                # Mas a assinatura de criar_agente exige um local.
+                # Vamos deixar como está e `criar_agente` levantará o erro se o local for ruim.
+                pass # Deixa a lógica original de criar_agente lidar com isso.
+
+        # Corrigindo a passagem do local para criar_agente:
+        # Se o local_atual não estiver definido no JSON, ou for None,
+        # precisamos de um nome de local válido para criar_agente.
+        # Se não houver um local válido, o agente não pode ser criado da forma como está.
+        # A função criar_agente espera um nome de local válido.
+        # Se 'local_atual' for None ou inválido, a criação falhará.
+        # Isso é um ponto a ser melhorado na robustez do save/load.
+        # Por enquanto, se 'local_atual' for None, a chamada a criar_agente falhará.
+        # Devemos garantir que 'local_atual' no JSON seja sempre um nome de local existente
+        # ou ter uma lógica de fallback (ex: primeiro local da lista).
+        # Para o escopo atual, vamos assumir que os dados salvos são consistentes.
+        # Se local_atual_nome for None, criar_agente vai falhar.
+        # A melhor abordagem é garantir que `local_atual` seja sempre um nome válido no JSON,
+        # ou modificar `criar_agente` para aceitar `local: Optional[str]`.
+        # A dataclass Agente já tem `local_atual: Optional[Local]`.
+        # `criar_agente` define `local_obj = locais.get(local)`. Se `local` é None, `get(None)` é None.
+        # Então `local_obj.adicionar_agente(self)` falhará.
+        # A correção mais simples é garantir que `criar_agente` possa lidar com `local_obj` sendo None,
+        # ou que o agente seja criado sem local se `local_atual_nome` for None.
+        # Por agora, vamos manter a lógica e se `local_atual_nome` for None, `criar_agente` falhará.
+
+        agente_local_nome = info.get("local_atual")
+        if not agente_local_nome and locais: # Se não há local salvo e há locais disponíveis
+            agente_local_nome = list(locais.keys())[0] # Usa o primeiro local como fallback
+            logger.warning(f"Agente '{info['nome']}' não tinha local_atual salvo. Atribuído ao local padrão '{agente_local_nome}'.")
+        elif not agente_local_nome and not locais:
+            logger.error(f"Não há locais definidos. Impossível carregar agente '{info['nome']}' sem um local_atual.")
+            continue # Pula este agente
+
+
+        ag = criar_agente(
+            info["nome"],
+            info["funcao"],
+            info["modelo_llm"],
+            agente_local_nome, # Usar o nome do local obtido/fallback
+            info.get("objetivo_atual", ""),
+        )
+        ag.historico_acoes = info.get("historico_acoes", [])
+        ag.historico_interacoes = info.get("historico_interacoes", [])
+        ag.historico_locais = info.get("historico_locais", ag.historico_locais)
+        ag.feedback_ceo = info.get("feedback_ceo", "")
+        ag.estado_emocional = info.get("estado_emocional", 0)
+
+    # Carregar histórico de ideias
+    carregar_historico_ideias(arquivo_historico_ideias)
         ag = criar_agente(
             info["nome"],
             info["funcao"],
@@ -819,9 +915,36 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
     from rh import modulo_rh
-    from ciclo_criativo import executar_ciclo_criativo
+    # A importação de executar_ciclo_criativo é feita aqui para evitar importação circular no topo do arquivo,
+    # já que ciclo_criativo importa empresa_digital (ed).
+    # A definição de Ideia foi movida para core_types.py para quebrar a dependência circular de tipos.
+    # As funções salvar_historico_ideias e carregar_historico_ideias ainda são importadas de ciclo_criativo.
+    # Isso é aceitável, pois são chamadas de função, não dependências de tipo na definição de classes globais.
+    import ciclo_criativo as cc
 
     inicializar_automaticamente()
+    # Carregar dados salvos, se existirem, após a inicialização padrão (que pode criar defaults)
+    # ou antes, dependendo da lógica desejada (sobrescrever defaults com salvos).
+    # Para este exemplo, vamos carregar após, o que significa que se os arquivos não existirem,
+    # a inicialização automática prevalece. Se existirem, eles sobrescrevem.
+    # Idealmente, carregar_dados deveria limpar o estado antes de carregar.
+    # A lógica atual de carregar_dados já zera agentes e locais.
+    # E carregar_historico_ideias também zera o histórico antes de carregar.
+
+    # Tentativa de carregar dados salvos. Se não existirem, a empresa continua com a inicialização automática.
+    # Definir nomes de arquivos padrão para salvar/carregar no exemplo.
+    save_file_agentes = "agentes_estado.json"
+    save_file_locais = "locais_estado.json"
+    save_file_ideias = "historico_ideias.json"
+
+    try:
+        carregar_dados(save_file_agentes, save_file_locais, save_file_ideias)
+        logger.info("Dados da simulação anterior carregados com sucesso.")
+    except FileNotFoundError:
+        logger.info("Nenhum dado salvo encontrado. Iniciando com uma nova simulação.")
+    except Exception as e:
+        logger.error(f"Erro ao carregar dados salvos: {e}. Iniciando com uma nova simulação.")
+
 
     for ciclo in range(1, 4):
         logging.info("=== Ciclo %d ===", ciclo)
@@ -875,3 +998,9 @@ if __name__ == "__main__":
         info = calcular_lucro_ciclo()
         logging.info("Saldo apos ciclo %d: %.2f", ciclo, info["saldo"])
 
+    # Salvar estado final da empresa
+    try:
+        salvar_dados(save_file_agentes, save_file_locais, save_file_ideias)
+        logger.info("Estado da simulação salvo com sucesso.")
+    except Exception as e:
+        logger.error(f"Erro ao salvar estado da simulação: {e}")

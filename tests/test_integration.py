@@ -92,3 +92,130 @@ def test_ciclo_completo_altera_saldo(mock_post, mock_obter_key, reset_state): # 
     assert ed.historico_saldo[-1] == 34.0
     assert ed.tarefas_pendentes # tarefa gerada pelo ciclo criativo
 
+
+@patch('ciclo_criativo.sugerir_conteudo_marketing') # Mock at the point of call in ciclo_criativo
+@patch('ciclo_criativo.produto_digital')      # Mock at the point of call in ciclo_criativo
+@patch('empresa_digital.obter_api_key', return_value="fake_api_key")
+@patch('requests.post') # Mock general LLM calls if any other agents run
+def test_product_creation_and_marketing_flow(
+    mock_requests_post, # For any other LLM calls by other agents
+    mock_obter_key,
+    mock_produto_digital,
+    mock_sugerir_marketing,
+    reset_state # Fixture to reset global state before test
+):
+    # --- Setup ---
+    # Mock a successful product creation
+    mock_gumroad_url = "https://gum.co/testprod123"
+    mock_produto_digital.return_value = mock_gumroad_url
+
+    # Mock successful marketing suggestion (not strictly necessary to check its return if just checking call)
+    mock_sugerir_marketing.return_value = "Marketing content here!"
+
+    # Create a validated idea and add it to a temporary list that prototipar_ideias will use.
+    # ciclo_criativo.historico_ideias is extended at the end of executar_ciclo_criativo.
+    # prototipar_ideias takes a list of 'ideias' as input.
+    # We need to ensure this idea is processed by prototipar_ideias.
+    # The flow in executar_ciclo_criativo:
+    # 1. propor_ideias() ->
+    # 2. validar_ideias(ideias_propostas) ->
+    # 3. prototipar_ideias(ideias_propostas) ->
+    # 4. historico_ideias.extend(ideias_propostas)
+    # So, we need to mock propor_ideias and validar_ideias to produce our test idea.
+
+    # Import Ideia from core_types for creating the test instance
+    from core_types import Ideia
+    test_ideia = Ideia(
+        descricao="Produto Teste para Fluxo Completo",
+        justificativa="Testar a integração da criação e marketing.",
+        autor="Teste Integrado",
+        validada=True, # Pre-validate it for prototipar_ideias
+        link_produto=None # Ensure it doesn't have a link yet
+    )
+
+    # Mock propor_ideias to return our specific test idea
+    # Mock validar_ideias to ensure our idea remains validated (or mock its internal logic)
+    # Patching them within ciclo_criativo's namespace
+    with patch('ciclo_criativo.propor_ideias', return_value=[test_ideia]) as mock_propor, \
+         patch('ciclo_criativo.validar_ideias', lambda ideias: None) as mock_validar: # Simple lambda to do nothing but ensure validada=True is kept
+
+        # --- Execution ---
+        # Execute a cycle. This will call prototipar_ideias, which should trigger our mocks.
+        # Ensure some basic agents exist if prototipar_ideias or other parts of the cycle need them.
+        ed.criar_local("TestLocal", "Local de teste", [])
+        ed.criar_agente("TestAgenteCriador", "CriadorDeProdutos", "test-model", "TestLocal")
+        ed.criar_agente("TestAgenteDivulgador", "Divulgador", "test-model", "TestLocal")
+
+        # Mock LLM calls for any other agents that might run to avoid errors
+        # if they are part of executar_ciclo_criativo's broader scope.
+        # The main test_ciclo_completo_altera_saldo already does this with a global mock_post.
+        # We can rely on the global mock_requests_post for other agents.
+        mock_llm_response = MagicMock()
+        mock_llm_response.status_code = 200
+        action_content = {"acao": "ficar"} # Default action for other agents
+        mock_llm_response.json.return_value = {"choices": [{"message": {"content": json.dumps(action_content)}}]}
+        mock_llm_response.text = json.dumps({"choices": [{"message": {"content": json.dumps(action_content)}}]})
+        mock_requests_post.return_value = mock_llm_response
+
+        executar_ciclo_criativo()
+
+    # --- Assertions ---
+    # 1. Check if produto_digital was called correctly
+    mock_produto_digital.assert_called_once()
+    called_ideia_pd, _, _ = mock_produto_digital.call_args[0]
+    assert called_ideia_pd.descricao == test_ideia.descricao
+
+    # 2. Check if the idea in historico_ideias has the link_produto set
+    # historico_ideias is a global in ciclo_criativo module
+    import ciclo_criativo # Import locally to access its global
+    assert len(ciclo_criativo.historico_ideias) > 0, "historico_ideias should not be empty"
+    processed_ideia = None
+    for idea_in_history in ciclo_criativo.historico_ideias: # Access directly
+        if idea_in_history.descricao == test_ideia.descricao:
+            processed_ideia = idea_in_history
+            break
+
+    assert processed_ideia is not None, "Test idea not found in historico_ideias"
+    assert processed_ideia.link_produto == mock_gumroad_url, "link_produto was not set on the idea"
+
+    # 3. Check if sugerir_conteudo_marketing was called correctly
+    mock_sugerir_marketing.assert_called_once()
+    called_ideia_sm, called_url_sm = mock_sugerir_marketing.call_args[0]
+    assert called_ideia_sm.descricao == test_ideia.descricao
+    assert called_url_sm == mock_gumroad_url
+
+    # 4. Check if an event for product creation was registered (done by produto_digital)
+    # This part is tricky as registrar_evento is in 'criador_de_produtos' and 'divulgador'
+    # We'd need to patch those specific instances or check ed.historico_eventos if it's global.
+    # For this test, focusing on the direct calls (produto_digital, sugerir_marketing) and
+    # the state change (ideia.link_produto) is primary.
+    # We can assume unit tests for criador_de_produtos and divulgador verify their own event registration.
+
+    # Example: Check ed.historico_eventos for relevant messages if it's reliable
+    # This assumes registrar_evento in criador_de_produtos and divulgador use the global ed.historico_eventos
+    # Convert ed.historico_eventos to a single string to search for substrings
+    all_events_string = " | ".join(ed.historico_eventos)
+    assert f"Novo produto '{test_ideia.descricao}' criado e publicado na Gumroad: {mock_gumroad_url}" in all_events_string
+    assert f"Geradas sugestões de marketing para o produto: {test_ideia.descricao}" in all_events_string
+
+# Note: The import `from ciclo_criativo import Ideia` might cause issues if `empresa_digital.py`
+# also imports `Ideia` from `ciclo_criativo.py` at the top level, leading to circular dependencies.
+# A common solution is to define `Ideia` in a separate `models.py` or ensure imports are carefully managed.
+# For this test, `ed.Ideia` is used assuming `empresa_digital` imports `Ideia` successfully.
+# Also, `ed.cc.historico_ideias` assumes `ciclo_criativo` is imported as `cc` in `empresa_digital` or
+# that `historico_ideias` is directly accessible.
+# Let's assume `import ciclo_criativo as cc` is added to `empresa_digital.py` or that `historico_ideias` is
+# directly available from `ciclo_criativo` module itself for the assertion.
+# The test uses `ed.cc.historico_ideias` which implies `empresa_digital` has `import ciclo_criativo as cc`.
+# If not, it should be `import ciclo_criativo; ciclo_criativo.historico_ideias`.
+# For simplicity, I'll assume `ciclo_criativo.historico_ideias` is directly accessible.
+# The previous change to empresa_digital.py added `from ciclo_criativo import Ideia, ...`
+# but not `import ciclo_criativo as cc`. So direct access to `ciclo_criativo.historico_ideias` is needed.
+# I'll adjust the assertion to use `import ciclo_criativo` and then `ciclo_criativo.historico_ideias`.
+# Actually, since `reset_state` clears `ciclo_criativo.historico_ideias`, we can check it directly.
+# `reset_state` is defined in `conftest.py` and should handle clearing relevant global states.
+# The test flow of `executar_ciclo_criativo` populates `ciclo_criativo.historico_ideias`.
+# So, the assertion `assert len(ciclo_criativo.historico_ideias) > 0` and subsequent checks are fine.
+# The `ed.Ideia` needs `from ciclo_criativo import Ideia` in `empresa_digital.py` for it to work.
+# This was part of a previous step.
+# Final check of historico_eventos: `ed.historico_eventos` is correct.

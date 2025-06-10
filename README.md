@@ -24,9 +24,8 @@ iniciais e tarefas), com a configuração inicial de agentes podendo usar heurí
 para seleção de modelos LLM. Durante os ciclos de simulação, as decisões de cada
 agente são tomadas através de chamadas reais a Modelos de Linguagem (LLMs)
 configurados para cada agente, via API OpenRouter.
-É necessário configurar uma chave da API OpenRouter para que o sistema funcione
-(veja as seções "Inicializador Automático" ou "Testes Automatizados" para detalhes
-sobre como configurar a `OPENROUTER_API_KEY`).
+É necessário configurar chaves de API para OpenRouter e Gumroad para que o sistema funcione
+completamente (veja a seção "Configuração" para detalhes).
 
 
 Cada agente mantém um histórico adaptativo contendo:
@@ -39,6 +38,22 @@ Cada agente mantém um histórico adaptativo contendo:
 
 Essas informações são incluídas no prompt gerado a cada ciclo, permitindo que a
 IA leve em conta a memória recente do agente.
+
+## Configuração
+
+Para o pleno funcionamento da simulação, especialmente as interações com serviços externos, são necessárias as seguintes configurações de chaves de API:
+
+### OpenRouter API Key
+Utilizada para as chamadas aos Modelos de Linguagem (LLMs) que impulsionam as decisões dos agentes.
+- **Método 1 (Recomendado):** Crie um arquivo chamado `.openrouter_key` na raiz do projeto e cole sua API Key da OpenRouter nele.
+- **Método 2:** Defina a variável de ambiente `OPENROUTER_API_KEY` com o valor da sua chave.
+O arquivo `.openrouter_key` está incluído no `.gitignore` para evitar commits acidentais.
+
+### Gumroad API Key
+Necessária para a funcionalidade de criação e publicação automática de produtos digitais na plataforma Gumroad.
+- **Método 1 (Recomendado):** Crie um arquivo chamado `.gumroad_key` na raiz do projeto e cole seu Access Token da Gumroad nele.
+- **Método 2:** Defina a variável de ambiente `GUMROAD_API_KEY` com o valor do seu Access Token.
+O arquivo `.gumroad_key` também está incluído no `.gitignore`.
 
 ## Decisões via LLM (Modelos de Linguagem Grandes)
 
@@ -126,32 +141,47 @@ Exemplo: se o saldo estiver baixo, o RH não abrirá vagas extras mesmo que uma
 sala esteja vazia. Já com saldo alto e tarefas pendentes, novos agentes são
 criados para acelerar a entrega de MVPs e gerar mais receita.
 
-## Ciclo criativo automatizado
+## Ciclo Criativo Automatizado e Criação de Produtos
 
 O módulo `ciclo_criativo.py` adiciona um fluxo de ideação e validação em cada
 `/ciclo/next`. Agentes com função **Ideacao** propõem produtos ou campanhas e
 justificam o potencial de lucro. Em seguida, agentes com função **Validador**
-avaliam riscos, recursos disponíveis e experiências anteriores. Se aprovadas,
-as ideias viram tarefas para executores e podem gerar contratações automáticas
-pelo RH.
+avaliam riscos, recursos disponíveis e experiências anteriores.
 
-Cada passagem registra no log a sequência `ideia -> validação -> prototipagem -> resultado`.
+Se aprovadas, as ideias não apenas se tornam tarefas para executores, mas também podem
+desencadear a **criação automática de um produto digital**. O sistema utiliza um LLM para
+gerar o conteúdo do produto (por exemplo, um guia em formato Markdown) com base na descrição
+e justificativa da ideia. Este arquivo é salvo localmente no diretório `produtos_gerados/`.
+
+### Publicação na Gumroad
+Após a geração do conteúdo, o produto é automaticamente publicado na plataforma **Gumroad**.
+Isso requer uma chave de API da Gumroad configurada (veja a seção "Configuração").
+O link público do produto na Gumroad é então registrado no sistema.
+
+### Divulgação com o Agente Divulgador
+Opcionalmente, após a publicação bem-sucedida de um produto, o agente **Divulgador**
+entra em ação. Este agente utiliza um LLM para gerar sugestões de conteúdo de marketing
+(posts para redes sociais, snippets de email) para promover o novo produto, utilizando
+o link da Gumroad.
+
+Cada passagem registra no log a sequência `ideia -> validação -> prototipagem/criação -> resultado`.
 Ideias lucrativas aumentam a prioridade de temas semelhantes nos ciclos
-seguintes; prejuízos reduzem essa preferência.
+seguintes; prejuízos reduzem essa preferência. O link do produto Gumroad e as sugestões
+de marketing também são registradas como eventos no sistema.
 
-Exemplo de log de sucesso:
+Exemplo de log de sucesso na criação de produto:
 
 ```text
 INFO:Ideia proposta: Produto IA proposto por Alice
 INFO:Validacao de Produto IA proposto por Alice por Bob: aprovada
-INFO:Prototipo de Produto IA proposto por Alice resultou em 30.00
-```
-
-Exemplo de log de fracasso:
-
-```text
-INFO:Ideia proposta: Produto IA proposto por Alice
-INFO:Validacao de Produto IA proposto por Alice por Bob: reprovada
+INFO:Tentando criar produto digital para ideia validada: Produto IA proposto por Alice
+INFO:Conteúdo do produto salvo em: produtos_gerados/produto_ia_proposto_por_alice.md
+INFO:Chave da API Gumroad obtida com sucesso.
+INFO:Tentando publicar produto 'Produto IA proposto por Alice' na Gumroad.
+INFO:Produto 'Produto IA proposto por Alice' publicado com sucesso na Gumroad: https://gum.co/exemplolink
+INFO:Tentando gerar sugestões de marketing para 'Produto IA proposto por Alice'...
+INFO:Sugestões de marketing geradas para 'Produto IA proposto por Alice'.
+INFO:Prototipo/Execução de Produto IA proposto por Alice resultou em X.XX (Link produto: https://gum.co/exemplolink)
 ```
 
 ## Simulação Contínua e Modo Vida Infinita
@@ -191,7 +221,8 @@ Os principais endpoints retornam dados em JSON:
 - `DELETE /locais/{nome}` – exclui a sala.
 - `GET /lucro` – retorna o saldo atual e o histórico acumulado.
 - `POST /ciclo/next` – executa um novo ciclo da simulação para todos os agentes.
-
+- `GET /eventos` - retorna o histórico de eventos registrados.
+- `GET /ideias` - retorna o histórico de ideias (incluindo links de produtos, se criados).
 
 
 ## Dashboard React
@@ -209,7 +240,7 @@ O mapa e as tabelas são atualizados a cada ciclo disparado pelo botão "Próxim
 ## Inicializador Automático
 
 Para subir todo o sistema com um único comando existe o script `start_empresa.py`.
-Ele instala dependências, solicita a chave da OpenRouter na primeira execução e
+Ele instala dependências, solicita as chaves de API (OpenRouter e Gumroad, se não configuradas) na primeira execução e
 inicia backend e frontend de forma integrada:
 
 ```bash
@@ -218,19 +249,15 @@ python start_empresa.py
 
 Etapas realizadas pelo script:
 
-1. Caso não exista o arquivo `.openrouter_key`, pede a sua API Key e salva
-   localmente. Esse arquivo armazena a chave e deve permanecer privado (já está
-   listado no `.gitignore`).
+1. Caso não existam os arquivos `.openrouter_key` e `.gumroad_key` (ou as variáveis de ambiente correspondentes não estejam definidas), pede as respectivas API Keys e salva localmente. Esses arquivos armazenam as chaves e devem permanecer privados (já estão listados no `.gitignore`).
 2. Instala os pacotes Python listados em `requirements.txt`.
 3. Garante que as dependências do dashboard estejam instaladas (`npm install`).
 4. Inicia o backend na porta 8000 e aguarda ele ficar disponível.
 5. Inicia o frontend na porta 5173 e mostra os endereços de acesso.
-6. Consulta a API para informar quais agentes e salas foram criados
-   automaticamente.
-7. Dispara automaticamente o primeiro ciclo da simulação e envia os eventos
-   iniciais para o dashboard.
+6. Consulta a API para informar quais agentes e salas foram criados automaticamente.
+7. Dispara automaticamente o primeiro ciclo da simulação e envia os eventos iniciais para o dashboard.
 
-Após a primeira execução a chave é reutilizada e o sistema pode ser iniciado
+Após a primeira execução as chaves são reutilizadas e o sistema pode ser iniciado
 novamente apenas rodando o mesmo comando.
 
 Durante o carregamento o dashboard exibe a mensagem **"Carregando/Iniciando a
@@ -242,13 +269,13 @@ decisões de cada agente.
 
 Para cenários sem interface visual há o script `start_backend.py`. Ele
 inicia apenas o backend FastAPI e já executa todo o processo de
-inicialização automática (salas, agentes, ciclo criativo, RH). A chave da
-OpenRouter pode ser passada diretamente pela flag `--apikey` (que tem
-prioridade sobre variáveis de ambiente ou arquivo `.openrouter_key`).
+inicialização automática (salas, agentes, ciclo criativo, RH). As chaves de API
+podem ser passadas diretamente pelas flags (ex: `--apikey OPENROUTER_KEY_VALUE` e `--gumroadkey GUMROAD_KEY_VALUE`),
+que têm prioridade sobre variáveis de ambiente ou arquivos locais.
 Há também a flag `--infinite` para ativar o **Modo Vida Infinita**.
 
 ```bash
-python start_backend.py --apikey MINHA_CHAVE --infinite
+python start_backend.py --apikey SUA_OPENROUTER_KEY --gumroadkey SUA_GUMROAD_KEY --infinite
 ```
 
 O backend ficará acessível em `http://localhost:8000` (ou na porta
@@ -266,8 +293,10 @@ Para executar todos os testes:
 # (o arquivo `requirements.txt` fixa o `httpx` na versão 0.23.x)
 pip install -r requirements.txt pytest
 
-# defina a chave da OpenRouter
-export OPENROUTER_API_KEY=XXXX   # ou crie um arquivo .env com essa variável
+# defina as chaves de API (OpenRouter e, opcionalmente, Gumroad para testes de produto)
+export OPENROUTER_API_KEY=XXXX
+export GUMROAD_API_KEY=YYYY # Opcional para testes específicos de Gumroad
+# ou crie um arquivo .env com essas variáveis
 
 # exemplo:
 # cp .env.example .env
@@ -313,20 +342,17 @@ python cli.py ciclo
 python cli.py modelos
 ```
 
-O utilitário lê a variável `OPENROUTER_API_KEY` ou o arquivo `.openrouter_key`
-para acessar endpoints que consultam a OpenRouter.
+O utilitário lê as variáveis de ambiente (`OPENROUTER_API_KEY`, `GUMROAD_API_KEY`) ou os arquivos locais (`.openrouter_key`, `.gumroad_key`) para acessar endpoints que consultam serviços externos.
 
 ### Operando tudo via CLI
 
 Para rodar a empresa digital apenas pela linha de comando:
 
-1. Garanta que as dependências do backend estejam instaladas (`pip install -r
-   requirements.txt`).
-2. Inicie o backend informando a chave diretamente na flag `--apikey` e,
-   opcionalmente, ative o modo infinito com `--infinite`:
+1. Garanta que as dependências do backend estejam instaladas (`pip install -r requirements.txt`).
+2. Inicie o backend informando as chaves diretamente nas flags e, opcionalmente, ative o modo infinito:
 
    ```bash
-   python start_backend.py --apikey sk-minha-chave --infinite
+   python start_backend.py --apikey SUA_OPENROUTER_KEY --gumroadkey SUA_GUMROAD_KEY --infinite
    ```
 
    O script imprime onde os dados são salvos e, quando o servidor está pronto,
@@ -341,7 +367,7 @@ Para rodar a empresa digital apenas pela linha de comando:
    # listar salas disponíveis
    python cli.py locais
 
-   # executar um ciclo completo (RH, ideias, lucro)
+   # executar um ciclo completo (RH, ideias, lucro, criação de produtos)
    python cli.py ciclo
    ```
 
@@ -350,4 +376,3 @@ Para rodar a empresa digital apenas pela linha de comando:
 
 Esses comandos permitem inicializar a empresa, verificar o estado corrente e
 rodar novos ciclos totalmente via linha de comando.
-
