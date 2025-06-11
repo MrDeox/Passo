@@ -230,3 +230,72 @@ class TestProdutoDigitalFailures:
 # Given `Agente` is a dataclass, direct instantiation as done in `criador_de_produtos.py` is usually fine.
 # The `registrar_evento` mock needs to be effective where `criador_de_produtos.registrar_evento` is called.
 # The patch decorator on the class or specific methods using `mock_dependencies` fixture handles this.
+
+class TestProdutoDigitalOfflineSimulation:
+    @patch('criador_de_produtos.uuid.uuid4') # Mock uuid to control the generated ID for the URL
+    def test_offline_simulation_mode_when_api_key_missing(self, mock_uuid, sample_ideia, mock_dependencies):
+        # Simulate Gumroad API key not being found
+        mock_dependencies["get_gumroad_key"].side_effect = ValueError("Gumroad key not found for test")
+
+        # Mock LLM calls to ensure content generation still happens
+        mock_dependencies["select_model"].return_value = "mock_llm_model_for_offline"
+        mock_dependencies["call_llm"].return_value = "# Conteúdo Offline Simulado\n\nEste é um teste."
+
+        # Mock uuid4().hex to return a predictable value
+        mock_uuid.return_value.hex = "simulated_uuid_123"
+
+        # Mock empresa_agentes and todos_locais
+        mock_empresa_agentes = {}
+        mock_todos_locais = {}
+
+        # Call a_os_remove to ensure it's not called in this path
+        with patch("os.remove") as mock_os_remove:
+            result_url = produto_digital(sample_ideia, mock_empresa_agentes, mock_todos_locais)
+
+            # Verify simulated URL
+            expected_simulated_url = "http://simulado/ideia_simulated_uuid_123"
+            assert result_url == expected_simulated_url
+
+            # Verify LLM calls were made
+            mock_dependencies["select_model"].assert_called_once()
+            mock_dependencies["call_llm"].assert_called_once()
+
+            # Verify file saving operations still occurred
+            mock_dependencies["makedirs"].assert_called_once_with(PRODUTOS_GERADOS_DIR, exist_ok=True)
+            expected_filename_base = "super_ebook_de_testes" # Based on sample_ideia.descricao
+            expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+            mock_dependencies["file_open"].assert_called_once_with(expected_filepath, "w", encoding="utf-8")
+            mock_dependencies["file_open"]().write.assert_called_once_with("# Conteúdo Offline Simulado\n\nEste é um teste.")
+
+            # Verify Gumroad publication was NOT attempted
+            mock_dependencies["create_gumroad_product"].assert_not_called()
+
+            # Verify os.remove was NOT called
+            mock_os_remove.assert_not_called()
+
+            # Verify event logging for simulation mode
+            event_found = False
+            for call_args_list in mock_dependencies["register_event"].call_args_list:
+                event_message = call_args_list[0][0] # Get the first positional argument of the call
+                if f"Produto simulado '{sample_ideia.descricao}' criado localmente: {expected_simulated_url}" in event_message:
+                    event_found = True
+                    break
+            assert event_found, "Event for simulated product creation not found or message mismatch."
+
+            # Verify logging for simulation mode (this checks logger.info, which is not directly part of mock_dependencies)
+            # This would require patching 'logging.getLogger.info' or checking caplog if using pytest's caplog fixture.
+            # For simplicity, we'll rely on the event registration for this test.
+
+    # Adjust the existing test_gumroad_api_key_not_found if its behavior is now fully covered
+    # by the offline simulation mode, or if it should test a different failure path.
+    # The old test implies that if the key is missing, it's an error path that tries to cleanup.
+    # The new logic means if the key is missing, it's a *successful* offline simulation.
+    # So, the old test `test_gumroad_api_key_not_found` might be invalid or need significant rework.
+    # Let's assume for now the new test above is the correct representation of "key missing" scenario.
+    # If there was a path where key is missing AND it's not simulation (e.g. an explicit --force-online flag),
+    # then a separate test would be needed. But current logic is: key missing -> simulation.
+    # I will remove the old `test_gumroad_api_key_not_found` as its assertions (like os.remove)
+    # are contrary to the new simulation path.
+
+# To make this test run, criador_de_produtos.py needs to import uuid: import uuid
+# This is because the main code now uses uuid.uuid4().hex for the simulated URL.

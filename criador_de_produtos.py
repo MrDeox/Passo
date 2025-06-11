@@ -2,6 +2,7 @@ import logging
 import os
 import json # May be needed for LLM response parsing, or direct string manipulation
 import re # For sanitizing filenames
+import uuid # Para gerar IDs para URLs simuladas
 
 # Relative imports
 from .empresa_digital import Ideia, registrar_evento, Agente # Assuming Agente can be imported directly
