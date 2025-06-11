@@ -4,6 +4,7 @@ from typing import List, Dict, Optional
 import json # Added for saving/loading historico_ideias
 import time # For timestamps in Service history
 import uuid # For Service IDs
+import os # For marketing content persistence
 
 import empresa_digital as ed
 from .core_types import Ideia, Service # Import Ideia and Service from core_types
@@ -116,62 +117,37 @@ def _tema_preferido() -> str:
     return max(preferencia_temas, key=preferencia_temas.get)
 
 
-def propor_ideias() -> List[Ideia]:
+def propor_ideias() -> None: # Modified to not return, but add directly to historicos
     """
-    Gera ideias de PRODUTOS simuladas a partir de agentes com funcao 'Ideacao'.
-    O LLM decide se quer propor um produto ou um serviço.
-    Esta função lida apenas com a parte de PRODUTO.
+    Gera ideias de produtos ou serviços usando LLM a partir de agentes com funcao 'Ideacao'.
+    O LLM decide se quer propor um produto, um serviço, ou nada.
+    As ideias/serviços aprovados são adicionados diretamente ao histórico correspondente.
     """
-    ideias_produto_propostas = []
-    tema = _tema_preferido() # Mantém a lógica de tema para produtos por enquanto
-
     agentes_ideacao = [ag for ag in ed.agentes.values() if ag.funcao.lower() == "ideacao"]
     if not agentes_ideacao:
-        logger.info("Nenhum agente de 'Ideacao' encontrado para propor ideias de produtos.")
-        return []
+        logger.info("Nenhum agente de 'Ideacao' encontrado para propor ideias/serviços.")
+        return
 
-    for ag in agentes_ideacao:
-        # Para simplificar, vamos manter a proposta de ideia de produto como antes,
-        # e a proposta de serviço será separada ou o LLM decidirá o tipo.
-        # Por enquanto, esta função foca em produtos.
-        # A decisão de propor produto OU serviço será feita no prompt do agente.
-        # Aqui, apenas criamos uma ideia de produto simples se o agente decidir por isso.
-        # A lógica mais complexa de decisão do LLM virá depois.
-
-        # Exemplo simplificado: O agente sempre propõe uma ideia de produto aqui.
-        # A sofisticação para o LLM escolher entre produto/serviço e retornar
-        # uma estrutura JSON diferenciada será adicionada na próxima etapa.
-        desc = f"Produto {tema} proposto por {ag.nome} (foco: produto)"
-        justificativa = f"Explora {tema} com alto potencial de lucro (foco: produto)"
-        ideia = Ideia(descricao=desc, justificativa=justificativa, autor=ag.nome)
-        ideias_produto_propostas.append(ideia)
-        logger.info("Ideia de PRODUTO proposta: %s", desc)
-        ed.registrar_evento(f"Ideia de PRODUTO proposta: {desc} por {ag.nome}")
-
-    return ideias_produto_propostas
-
-
-def propor_servicos() -> List[Service]:
-    """
-    Gera propostas de SERVIÇOS a partir de agentes com funcao 'Ideacao'.
-    O LLM do agente deve ser instruído a fornecer os detalhes do serviço.
-    """
-    servicos_propostos = []
-    agentes_ideacao = [ag for ag in ed.agentes.values() if ag.funcao.lower() == "ideacao"]
-
-    if not agentes_ideacao:
-        logger.info("Nenhum agente de 'Ideacao' encontrado para propor serviços.")
-        return []
+    tema_preferido = _tema_preferido() # Usado no prompt
 
     for agente in agentes_ideacao:
-        # Prompt para o LLM do agente de ideação
-        # Este prompt precisa ser mais elaborado para pedir detalhes do serviço
-        # e especificar o formato JSON esperado para um serviço.
         contexto_agente = ed.gerar_prompt_dinamico(agente)
-        prompt_servico = f"""{contexto_agente}
-Você é um agente de ideação. Sua tarefa é propor um novo SERVIÇO para a empresa.
-Pense em um serviço que poderia ser lucrativo e viável com as (hipotéticas) capacidades da empresa.
-Detalhe o serviço proposto no seguinte formato JSON. Responda APENAS com o JSON:
+        prompt_ideia_ou_servico = f"""{contexto_agente}
+Você é um agente de ideação. Sua tarefa é propor uma nova ideia de PRODUTO, um novo SERVIÇO para a empresa, ou decidir que nenhuma ideia é adequada no momento.
+Considere o tema preferido atual da empresa: '{tema_preferido}'. Você pode seguir este tema ou propor algo inovador.
+
+Responda APENAS com um JSON no seguinte formato:
+
+Se for uma ideia de PRODUTO:
+{{
+  "type": "product",
+  "name": "Nome do Produto",
+  "description": "Descrição detalhada do produto e seu público-alvo.",
+  "justification": "Justificativa para o produto, por que ele seria valioso.",
+  "target_audience": "Público-alvo específico para este produto."
+}}
+
+Se for uma ideia de SERVIÇO:
 {{
   "type": "service",
   "service_name": "Nome do Serviço",
@@ -181,14 +157,42 @@ Detalhe o serviço proposto no seguinte formato JSON. Responda APENAS com o JSON
   "pricing_model": "fixed_price", // ou "hourly_rate"
   "price_amount": 2500.00 // Preço total ou taxa horária
 }}
-Se você não conseguir propor um serviço ou achar que não é o momento, responda com: {{"type": "none"}}
+
+Se NENHUMA ideia for proposta:
+{{
+  "type": "none"
+}}
+
+Responda APENAS com o JSON.
 """
-        logger.debug(f"Prompt de proposta de serviço para {agente.nome}:\n{prompt_servico}")
-        resposta_llm_raw = ed.enviar_para_llm(agente, prompt_servico)
+        logger.debug(f"Prompt de proposta de ideia/serviço para {agente.nome}:\n{prompt_ideia_ou_servico}")
+        resposta_llm_raw = ed.enviar_para_llm(agente, prompt_ideia_ou_servico)
 
         try:
             resposta_json = json.loads(resposta_llm_raw)
-            if isinstance(resposta_json, dict) and resposta_json.get("type") == "service":
+            idea_type = resposta_json.get("type")
+
+            if idea_type == "product":
+                nova_ideia = Ideia(
+                    descricao=resposta_json.get("description", "Produto sem descrição detalhada."),
+                    justificativa=resposta_json.get("justification", "Sem justificativa fornecida."),
+                    autor=agente.nome,
+                    # Campos adicionais podem ser adicionados aqui se Ideia for expandida
+                    # ex: nome=resposta_json.get("name"), publico_alvo=resposta_json.get("target_audience")
+                )
+                # Poderíamos adicionar o nome e target_audience à Ideia se a classe suportar
+                # Por agora, a descrição e justificativa são os campos principais.
+                if hasattr(nova_ideia, 'nome'): # Exemplo de como poderia ser se Ideia tivesse 'nome'
+                    nova_ideia.nome = resposta_json.get("name", "Produto Sem Nome")
+
+                if nova_ideia not in historico_ideias:
+                    historico_ideias.append(nova_ideia)
+                    logger.info(f"Nova IDEIA DE PRODUTO proposta por {agente.nome}: '{resposta_json.get('name', nova_ideia.descricao)}'")
+                    ed.registrar_evento(f"Nova IDEIA DE PRODUTO: '{resposta_json.get('name', nova_ideia.descricao)}' por {agente.nome}")
+                else:
+                    logger.info(f"Ideia de produto similar já existe no histórico, proposta por {agente.nome}: '{resposta_json.get('name', nova_ideia.descricao)}'")
+
+            elif idea_type == "service":
                 novo_servico = Service(
                     service_name=resposta_json.get("service_name", "Serviço Sem Nome"),
                     description=resposta_json.get("description", "Sem descrição detalhada."),
@@ -197,136 +201,220 @@ Se você não conseguir propor um serviço ou achar que não é o momento, respo
                     estimated_effort_hours=resposta_json.get("estimated_effort_hours", 0),
                     pricing_model=resposta_json.get("pricing_model", "fixed_price"),
                     price_amount=resposta_json.get("price_amount", 0.0),
-                    # id, creation_timestamp, status, history são definidos no __init__ ou __post_init__
                 )
-                servicos_propostos.append(novo_servico)
-                logger.info(f"Serviço proposto por {agente.nome}: '{novo_servico.service_name}' (ID: {novo_servico.id})")
-                ed.registrar_evento(f"Novo SERVIÇO proposto: '{novo_servico.service_name}' por {agente.nome}")
-            elif isinstance(resposta_json, dict) and resposta_json.get("type") == "none":
-                logger.info(f"Agente {agente.nome} decidiu não propor um serviço desta vez.")
+                if novo_servico not in historico_servicos:
+                    historico_servicos.append(novo_servico)
+                    logger.info(f"Novo SERVIÇO proposto por {agente.nome}: '{novo_servico.service_name}' (ID: {novo_servico.id})")
+                    ed.registrar_evento(f"Novo SERVIÇO proposto: '{novo_servico.service_name}' por {agente.nome}")
+                else:
+                    logger.info(f"Serviço similar já existe no histórico, proposto por {agente.nome}: '{novo_servico.service_name}'")
+
+            elif idea_type == "none":
+                logger.info(f"Agente {agente.nome} decidiu não propor uma ideia ou serviço desta vez.")
             else:
-                logger.warning(f"Resposta LLM para proposta de serviço de {agente.nome} não reconhecida ou tipo incorreto: {resposta_llm_raw}")
-                # Registrar uma falha na ação do agente pode ser feito aqui se necessário
+                logger.warning(f"Resposta LLM para proposta de {agente.nome} não reconhecida ou tipo incorreto: {resposta_llm_raw}")
+
         except json.JSONDecodeError:
-            logger.error(f"Falha ao decodificar JSON da resposta LLM para proposta de serviço de {agente.nome}: {resposta_llm_raw}")
+            logger.error(f"Falha ao decodificar JSON da resposta LLM para proposta de {agente.nome}: {resposta_llm_raw}")
         except Exception as e:
-            logger.error(f"Erro ao processar proposta de serviço de {agente.nome}: {e}. Resposta LLM: {resposta_llm_raw}", exc_info=True)
+            logger.error(f"Erro ao processar proposta de {agente.nome}: {e}. Resposta LLM: {resposta_llm_raw}", exc_info=True)
 
-    return servicos_propostos
+# A função propor_servicos() foi removida pois sua funcionalidade foi integrada em propor_ideias().
 
+from typing import Union # For type hinting Ideia | Service
 
-def validar_ideias(ideias_para_validar: List[Ideia]) -> None:
-    """Valida as ideias de PRODUTO usando agentes com funcao 'Validador'."""
-    validadores = [a for a in ed.agentes.values() if a.funcao.lower() == "validador"]
-    if not validadores:
-        logger.warning("Nenhum agente 'Validador' encontrado para validar ideias de produtos.")
-        # Marcar todas as ideias como não validadas ou alguma outra lógica de fallback
-        for ideia in ideias_para_validar:
-            ideia.validada = False # Ou manter como está, dependendo da política
-        return
+def _aplicar_heuristica_fallback(item: Union[Ideia, Service]) -> None:
+    """Aplica uma heurística de fallback para validar ou rejeitar um item."""
+    item_type = "Ideia de Produto" if isinstance(item, Ideia) else "Serviço"
+    item_name = item.descricao if isinstance(item, Ideia) else item.service_name
 
-    for ideia in ideias_para_validar:
-        if ideia.validada: # Já validada anteriormente
-            continue
+    logger.info(f"Aplicando heurística de fallback para {item_type}: '{item_name}'.")
 
-        # Exemplo simplificado: Validação por LLM (a ser implementado de forma mais robusta)
-        # Por enquanto, mantém a lógica original de validação de produto.
-        validador_escolhido = validadores[0] # Simplista: pega o primeiro validador
+    if isinstance(item, Ideia):
+        # Lógica de fallback original para Ideias (ex: baseada em keyword)
+        aprovado_fallback = "ia" in item.descricao.lower() or "produto" in item.descricao.lower()
+        item.validada = aprovado_fallback
+        status_msg = "aprovada (fallback)" if aprovado_fallback else "rejeitada (fallback)"
+        logger.info(f"Fallback: {item_type} '{item_name}' foi {status_msg} pela heurística.")
+        ed.registrar_evento(f"Fallback: {item_type} '{item_name}' {status_msg}.")
+    elif isinstance(item, Service):
+        # Lógica de fallback para Serviços (pode ser mais simples ou complexa)
+        # Exemplo: aprovar serviços com baixo esforço estimado ou rejeitar outros.
+        if item.estimated_effort_hours <= 20 and item.price_amount > 0:
+            item.update_status("validated", "Validado por heurística de fallback (baixo esforço).")
+            logger.info(f"Fallback: Serviço '{item_name}' APROVADO (baixo esforço).")
+            ed.registrar_evento(f"Fallback: Serviço '{item_name}' APROVADO (baixo esforço).")
+        else:
+            item.update_status("rejected", "Rejeitado por heurística de fallback (critério não atendido).")
+            logger.info(f"Fallback: Serviço '{item_name}' REJEITADO (critério não atendido).")
+            ed.registrar_evento(f"Fallback: Serviço '{item_name}' REJEITADO (critério não atendido).")
 
-        # Aqui, o prompt para o LLM do validador de PRODUTO seria construído.
-        # Por ora, a lógica antiga é mantida para focar na estrutura do serviço.
-        aprovado = "ia" in ideia.descricao.lower() # Lógica de validação original e simplista
+def _validar_item_com_llm(item: Union[Ideia, Service], validador: ed.Agente) -> bool:
+    """
+    Valida um item (Ideia ou Service) usando o LLM de um agente Validador.
+    Implementa um loop de retentativa para erros de parsing JSON.
+    Retorna True se a validação foi concluída (aprovada, rejeitada ou auto-rejeitada),
+    False se houve falha persistente de comunicação com LLM (não JSON).
+    """
+    MAX_VALIDATION_ATTEMPTS = 3
+    validation_attempts = 0
+    item_type_str = "Ideia de Produto" if isinstance(item, Ideia) else "Serviço"
+    item_identifier = item.descricao if isinstance(item, Ideia) else item.service_name
 
-        logger.info(
-            "Validacao de IDEIA DE PRODUTO '%s' por %s: %s",
-            ideia.descricao,
-            validador_escolhido.nome,
-            "aprovada" if aprovado else "reprovada",
-        )
-        ed.registrar_evento(
-            f"Validacao de IDEIA DE PRODUTO '{ideia.descricao}' por {validador_escolhido.nome}: {'aprovada' if aprovado else 'reprovada'}"
-        )
-        if aprovado:
-            ideia.validada = True
-            # ed.adicionar_tarefa(f"Prototipar produto: {ideia.descricao}") # Tarefa para produto
-        # Se reprovada, a ideia simplesmente não terá `ideia.validada = True`
+    prompt_context = f"Você é um agente Validador da empresa '{ed.NOME_EMPRESA}'. Sua tarefa é analisar a seguinte proposta e decidir se deve ser 'aprovar' ou 'rejeitar'."
+    habilidades_disponiveis_simples = list(set(ag.funcao for ag in ed.agentes.values())) # Para contexto do LLM
 
-def validar_servicos(servicos_para_validar: List[Service]) -> None:
-    """Valida as propostas de SERVIÇO usando agentes com funcao 'Validador'."""
-    validadores = [a for a in ed.agentes.values() if a.funcao.lower() == "validador"]
-    if not validadores:
-        logger.warning("Nenhum agente 'Validador' encontrado para validar propostas de serviços.")
-        for servico in servicos_para_validar:
-            if servico.status == "proposed": # Só tenta validar se ainda está proposto
-                 servico.update_status("rejected", "Validação automática: Nenhum validador disponível.")
-        return
-
-    for servico in servicos_para_validar:
-        if servico.status != "proposed": # Só valida se está no estado "proposed"
-            logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) já foi processado (status: {servico.status}). Pulando validação.")
-            continue
-
-        validador_escolhido = validadores[0] # Simplista: pega o primeiro
-
-        # TODO: Melhorar a lógica de quais habilidades estão disponíveis na empresa.
-        # Por enquanto, o LLM pode ter que inferir ou podemos passar uma lista simplificada.
-        habilidades_disponiveis_simples = list(set(ag.funcao for ag in ed.agentes.values()))
-
-
-        contexto_validador = ed.gerar_prompt_dinamico(validador_escolhido)
-        prompt_validacao_servico = f"""{contexto_validador}
-Você é um agente Validador. Sua tarefa é analisar a seguinte proposta de SERVIÇO e decidir se deve ser 'aprovada' ou 'rejeitada'.
-Leve em consideração a descrição, habilidades requeridas, esforço estimado e preço.
+    if isinstance(item, Ideia):
+        prompt_details = f"""
+Tipo da Proposta: {item_type_str}
+Nome/Descrição: {item.descricao}
+Justificativa: {item.justificativa}
+Autor: {item.autor}
+"""
+    else: # Service
+        prompt_details = f"""
+Tipo da Proposta: {item_type_str}
+ID: {item.id}
+Nome: {item.service_name}
+Descrição: {item.description}
+Autor: {item.author}
+Habilidades Requeridas: {', '.join(item.required_skills)}
+Esforço Estimado (horas): {item.estimated_effort_hours}
+Modelo de Preço: {item.pricing_model}
+Valor/Taxa: {item.price_amount}
 Habilidades/Funções de agentes disponíveis na empresa (simplificado): {', '.join(habilidades_disponiveis_simples)}.
+"""
 
-Detalhes da Proposta de Serviço:
-ID: {servico.id}
-Nome: {servico.service_name}
-Descrição: {servico.description}
-Autor: {servico.author}
-Habilidades Requeridas: {', '.join(servico.required_skills)}
-Esforço Estimado (horas): {servico.estimated_effort_hours}
-Modelo de Preço: {servico.pricing_model}
-Valor/Taxa: {servico.price_amount}
-
+    prompt_llm = f"""{ed.gerar_prompt_dinamico(validador)}
+{prompt_context}
+{prompt_details}
+Analise a proposta acima. Considere sua viabilidade, alinhamento estratégico, potencial de valor e riscos.
 Responda APENAS com um JSON contendo sua decisão e uma breve justificativa:
 {{
-  "service_id": "{servico.id}",
-  "decision": "aprovada", // ou "rejeitada"
-  "justification": "A proposta parece viável e alinhada com os objetivos da empresa."
+  "decision": "aprovar", // ou "rejeitar"
+  "justification": "Sua justificativa detalhada aqui (seja conciso)."
 }}
 """
-        logger.debug(f"Prompt de validação de serviço para {validador_escolhido.nome}:\n{prompt_validacao_servico}")
-        resposta_llm_raw = ed.enviar_para_llm(validador_escolhido, prompt_validacao_servico)
+    logger.debug(f"Prompt de validação para {item_type_str} '{item_identifier}' (Validador: {validador.nome}):\n{prompt_llm}")
+
+    while validation_attempts < MAX_VALIDATION_ATTEMPTS:
+        validation_attempts += 1
+        logger.info(f"Tentativa de validação {validation_attempts}/{MAX_VALIDATION_ATTEMPTS} para {item_type_str} '{item_identifier}' com {validador.nome}.")
 
         try:
+            resposta_llm_raw = ed.enviar_para_llm(validador, prompt_llm)
+            if not resposta_llm_raw: # Caso o LLM retorne string vazia ou None
+                logger.error(f"Resposta LLM vazia na tentativa {validation_attempts} para {item_type_str} '{item_identifier}'.")
+                if validation_attempts == MAX_VALIDATION_ATTEMPTS:
+                    break # Sai para auto-rejeição por falha de LLM
+                continue # Próxima tentativa
+
             resposta_json = json.loads(resposta_llm_raw)
-            if isinstance(resposta_json, dict) and resposta_json.get("service_id") == servico.id:
-                decisao = resposta_json.get("decision")
-                justificativa = resposta_json.get("justification", "Sem justificativa fornecida.")
+            decisao = resposta_json.get("decision")
+            justificativa = resposta_json.get("justification", "Sem justificativa fornecida pelo LLM.")
 
-                if decisao == "aprovada":
-                    servico.update_status("validated", f"Validado por {validador_escolhido.nome}: {justificativa}")
-                    logger.info(f"SERVIÇO '{servico.service_name}' (ID: {servico.id}) APROVADO por {validador_escolhido.nome}. Justificativa: {justificativa}")
-                    ed.registrar_evento(f"SERVIÇO '{servico.service_name}' APROVADO. Validador: {validador_escolhido.nome}. Justificativa: {justificativa}")
-                    # ed.adicionar_tarefa(f"Iniciar execução do serviço: {servico.service_name} (ID: {servico.id})")
-                elif decisao == "rejeitada":
-                    servico.update_status("rejected", f"Rejeitado por {validador_escolhido.nome}: {justificativa}")
-                    logger.info(f"SERVIÇO '{servico.service_name}' (ID: {servico.id}) REJEITADO por {validador_escolhido.nome}. Justificativa: {justificativa}")
-                    ed.registrar_evento(f"SERVIÇO '{servico.service_name}' REJEITADO. Validador: {validador_escolhido.nome}. Justificativa: {justificativa}")
-                else:
-                    logger.warning(f"Decisão de validação de serviço '{decisao}' não reconhecida para o serviço ID {servico.id} por {validador_escolhido.nome}. Resposta: {resposta_llm_raw}")
-                    servico.update_status("rejected", f"Falha na validação (decisão inválida) por {validador_escolhido.nome}: {justificativa}")
+            if decisao == "aprovar":
+                if isinstance(item, Ideia):
+                    item.validada = True
+                else: # Service
+                    item.update_status("validated", f"Aprovado por {validador.nome}: {justificativa}")
+                logger.info(f"{item_type_str} '{item_identifier}' APROVADO por {validador.nome} (Tentativa {validation_attempts}). Justificativa: {justificativa}")
+                ed.registrar_evento(f"{item_type_str} '{item_identifier}' APROVADO. Validador: {validador.nome}. Just.: {justificativa}")
+                return True # Validação concluída
+            elif decisao == "rejeitar":
+                if isinstance(item, Ideia):
+                    item.validada = False # Mantém False, mas registra o evento
+                else: # Service
+                    item.update_status("rejected", f"Rejeitado por {validador.nome}: {justificativa}")
+                logger.info(f"{item_type_str} '{item_identifier}' REJEITADO por {validador.nome} (Tentativa {validation_attempts}). Justificativa: {justificativa}")
+                ed.registrar_evento(f"REJEITADO: {item_type_str} '{item_identifier}'. Validador: {validador.nome}. Just.: {justificativa}")
+                return True # Validação concluída
             else:
-                logger.warning(f"Resposta LLM para validação de serviço de {validador_escolhido.nome} com ID de serviço incorreto ou formato inválido: {resposta_llm_raw}")
-                servico.update_status("rejected", f"Falha na validação (resposta LLM inválida) por {validador_escolhido.nome}.")
-        except json.JSONDecodeError:
-            logger.error(f"Falha ao decodificar JSON da resposta LLM para validação de serviço de {validador_escolhido.nome}: {resposta_llm_raw}")
-            servico.update_status("rejected", f"Falha na validação (JSON inválido) por {validador_escolhido.nome}.")
-        except Exception as e:
-            logger.error(f"Erro ao processar validação de serviço ID {servico.id} por {validador_escolhido.nome}: {e}. Resposta LLM: {resposta_llm_raw}", exc_info=True)
-            servico.update_status("rejected", f"Falha na validação (erro interno) por {validador_escolhido.nome}.")
+                logger.warning(f"Decisão LLM ('{decisao}') não reconhecida na tentativa {validation_attempts} para {item_type_str} '{item_identifier}'. Resposta: {resposta_llm_raw}")
+                # Se for a última tentativa e a decisão for inválida, cai para a auto-rejeição abaixo.
 
+        except json.JSONDecodeError:
+            logger.error(f"Falha ao decodificar JSON da resposta LLM na tentativa {validation_attempts} para {item_type_str} '{item_identifier}'. Resposta: {resposta_llm_raw}")
+            # Se for a última tentativa com JSON inválido, cai para a auto-rejeição abaixo.
+        except Exception as e: # Outras exceções, como problemas de API não tratados em enviar_para_llm
+            logger.error(f"Erro ao enviar para LLM ou processar resposta na tentativa {validation_attempts} para {item_type_str} '{item_identifier}': {e}", exc_info=True)
+            if validation_attempts == MAX_VALIDATION_ATTEMPTS: # Se falha de comunicação persistir
+                logger.error(f"Falha de comunicação persistente com LLM para {item_type_str} '{item_identifier}' após {MAX_VALIDATION_ATTEMPTS} tentativas.")
+                # Neste caso, a função retornará False, indicando falha de comunicação.
+                # A heurística de fallback pode ser aplicada em `validar_propostas`.
+                return False
+
+        if validation_attempts == MAX_VALIDATION_ATTEMPTS: # Se chegou aqui é porque as tentativas esgotaram com JSON inválido ou decisão não reconhecida
+            logger.warning(f"Esgotadas {MAX_VALIDATION_ATTEMPTS} tentativas de validação LLM para {item_type_str} '{item_identifier}'. Auto-rejeitando.")
+            just_auto_rejeicao = f"Auto-rejeitado após {MAX_VALIDATION_ATTEMPTS} tentativas de validação LLM resultarem em resposta inválida ou não conclusiva."
+            if isinstance(item, Ideia):
+                item.validada = False
+            else: # Service
+                item.update_status("rejected", just_auto_rejeicao)
+            logger.info(f"{item_type_str} '{item_identifier}' AUTO-REJEITADO. Motivo: {just_auto_rejeicao}")
+            ed.registrar_evento(f"AUTO-REJEITADO: {item_type_str} '{item_identifier}'. Motivo: {just_auto_rejeicao}")
+            return True # Validação concluída (com auto-rejeição)
+
+    # Se o loop terminar sem retornar True (o que não deveria acontecer devido à auto-rejeição na última tentativa)
+    # ou se uma falha de comunicação persistente ocorreu e retornou False.
+    # Este log é mais para o caso de falha de comunicação onde retornamos False.
+    if validation_attempts == MAX_VALIDATION_ATTEMPTS: # Chegou aqui se retornou False de dentro do loop
+        logger.error(f"Validação LLM para {item_type_str} '{item_identifier}' falhou após {MAX_VALIDATION_ATTEMPTS} tentativas devido a problemas de comunicação ou erro inesperado não tratado como JSON.")
+        return False
+
+    return False # Segurança, não deveria ser atingido normalmente.
+
+
+def validar_propostas(ideias_para_validar: List[Ideia], servicos_para_validar: List[Service]) -> None:
+    """
+    Valida uma lista de ideias e serviços usando agentes Validadores e LLM.
+    Aplica heurística de fallback se validadores não estiverem disponíveis ou LLM falhar persistentemente.
+    """
+    validadores = [a for a in ed.agentes.values() if a.funcao.lower() == "validador"]
+
+    itens_a_processar: List[Union[Ideia, Service]] = []
+
+    for ideia in ideias_para_validar:
+        if not ideia.validada and not ideia.executada:
+            itens_a_processar.append(ideia)
+        else:
+            logger.info(f"Ideia '{ideia.descricao}' já validada ou executada. Pulando.")
+
+    for servico in servicos_para_validar:
+        if servico.status == "proposed":
+            itens_a_processar.append(servico)
+        else:
+            logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) não está 'proposed' (status: {servico.status}). Pulando.")
+
+    if not itens_a_processar:
+        logger.info("Nenhuma ideia ou serviço novo para validar neste ciclo.")
+        return
+
+    if not validadores:
+        logger.warning("Nenhum agente 'Validador' encontrado. Aplicando heurística de fallback para todos os itens pendentes.")
+        for item in itens_a_processar:
+            _aplicar_heuristica_fallback(item)
+        return
+
+    validador_escolhido = validadores[0] # Simplista: pega o primeiro validador. Poderia ser aleatório ou round-robin.
+    logger.info(f"Usando validador: {validador_escolhido.nome} para as próximas validações.")
+
+    for item in itens_a_processar:
+        item_type_str = "Ideia de Produto" if isinstance(item, Ideia) else "Serviço"
+        item_identifier = item.descricao if isinstance(item, Ideia) else item.service_name
+
+        logger.info(f"Iniciando processo de validação para {item_type_str}: '{item_identifier}'.")
+
+        # Tenta validar com LLM
+        llm_validation_completed_or_failed_definitively = _validar_item_com_llm(item, validador_escolhido)
+
+        if not llm_validation_completed_or_failed_definitively:
+            # Isso significa que _validar_item_com_llm retornou False,
+            # indicando falha persistente de comunicação com LLM, não um JSON inválido ou decisão.
+            logger.warning(f"Validação LLM para {item_type_str} '{item_identifier}' falhou devido a problemas de comunicação persistentes. Aplicando heurística de fallback.")
+            _aplicar_heuristica_fallback(item)
+        # Se llm_validation_completed_or_failed_definitively for True, o item foi aprovado, rejeitado pelo LLM, ou auto-rejeitado.
+        # Nesses casos, a decisão do LLM (ou auto-rejeição) é final e o fallback não é aplicado.
 
 def prototipar_ideias(ideias: List[Ideia]) -> None:
     """Simula prototipagem gerando lucro ou prejuizo."""
@@ -347,10 +435,29 @@ def prototipar_ideias(ideias: List[Ideia]) -> None:
 
                     # >>> Integration of Divulgador <<<
                     logger.info(f"Tentando gerar sugestões de marketing para '{ideia.descricao}'...")
-                    marketing_sugestoes = sugerir_conteudo_marketing(ideia, product_url)
+                    marketing_sugestoes = sugerir_conteudo_marketing(ideia, product_url) # This is from .divulgador
                     if marketing_sugestoes:
-                        # Logging e registro de evento são feitos dentro de sugerir_conteudo_marketing
                         logger.info(f"Sugestões de marketing geradas para '{ideia.descricao}'.")
+
+                        # Persist marketing content
+                        PRODUTOS_MARKETING_DIR = "produtos_marketing" # Define base directory
+                        try:
+                            idea_marketing_path = os.path.join(PRODUTOS_MARKETING_DIR, ideia.slug)
+                            os.makedirs(idea_marketing_path, exist_ok=True)
+
+                            filepath = os.path.join(idea_marketing_path, "marketing.md")
+                            with open(filepath, "w", encoding="utf-8") as f:
+                                f.write(marketing_sugestoes)
+                            logger.info(f"Conteúdo de marketing para '{ideia.descricao}' salvo em {filepath}")
+
+                            # Append summary to historico_eventos
+                            resumo_marketing = marketing_sugestoes[:150].replace('\n', ' ') + "..."
+                            ed.registrar_evento(f"Marketing para '{ideia.descricao}': {resumo_marketing} (Salvo em: {filepath})")
+
+                        except IOError as e:
+                            logger.error(f"Erro ao salvar conteúdo de marketing para '{ideia.descricao}' em {filepath}: {e}")
+                        except Exception as e_general:
+                             logger.error(f"Erro inesperado ao salvar marketing para '{ideia.descricao}': {e_general}", exc_info=True)
                     else:
                         logger.warning(f"Não foram geradas sugestões de marketing para '{ideia.descricao}'.")
                     # >>> End Integration of Divulgador <<<
@@ -378,87 +485,223 @@ def prototipar_ideias(ideias: List[Ideia]) -> None:
             # Se o resultado não foi definido pela lógica de criação de produto (ex: ideia já tinha link_produto)
             # ou se queremos adicionar mais alguma lógica de resultado baseada em 'sucesso'
             if ideia.resultado == 0.0 and not ideia.link_produto : # Só aplica resultado padrão se não foi tocado pela criação de produto.
-                sucesso_prototipagem = "ia" in ideia.descricao.lower() # Condição de sucesso original
-                ideia.resultado = 30.0 if sucesso_prototipagem else -10.0
+                # Se 'ideia.resultado' ainda for 0.0 aqui (e não houve tentativa de criação de produto),
+                # podemos considerar que não houve sucesso claro ou aplicar uma lógica de prototipagem simples.
+                # Por ora, vamos manter a lógica que o resultado é primariamente definido pela criação do produto.
+                # Se nenhuma criação ocorreu e resultado é 0, ele permanecerá 0.
+                logger.info(f"Ideia '{ideia.descricao}' não teve produto criado e resultado inicial é 0.0. Nenhuma alteração de resultado aqui.")
+
+
+            # Creditar lucro/prejuízo ao saldo da empresa e registrar evento
+            # Isso deve acontecer após a tentativa de criação do produto e definição do ideia.resultado.
+            if ideia.resultado > 0:
+                ed.saldo += ideia.resultado
+                logger.info(f"Lucro do produto '{ideia.descricao}' de +{ideia.resultado:.2f} creditado. Saldo atual: {ed.saldo:.2f}")
+                ed.registrar_evento(f"Lucro produto '{ideia.descricao}' (+{ideia.resultado:.2f}). Saldo atual: {ed.saldo:.2f}")
+            elif ideia.resultado < 0:
+                ed.saldo += ideia.resultado # Adiciona o valor negativo (subtrai)
+                logger.info(f"Prejuízo/Custo do produto '{ideia.descricao}' de {ideia.resultado:.2f} debitado. Saldo atual: {ed.saldo:.2f}")
+                ed.registrar_evento(f"Prejuízo/Custo produto '{ideia.descricao}' ({ideia.resultado:.2f}). Saldo atual: {ed.saldo:.2f}")
+            else: # ideia.resultado == 0
+                logger.info(f"Produto '{ideia.descricao}' não gerou lucro nem prejuízo no estágio de prototipagem/criação. Saldo atual: {ed.saldo:.2f}")
+                # Não registrar evento de lucro/prejuízo se for zero, mas o evento de prototipagem abaixo cobrirá.
 
             tema = "IA" if "ia" in ideia.descricao.lower() else "outros" # TODO: Melhorar extração de tema
-            preferencia_temas[tema] = preferencia_temas.get(tema, 0) + (1 if sucesso else -1)
+            # Correção do bug: usar ideia.resultado > 0 para determinar o sucesso para preferencia_temas.
+            # Esta variável 'sucesso_da_ideia' é especificamente para a lógica de preferencia_temas.
+            sucesso_para_preferencia_tema = ideia.resultado > 0
+            preferencia_temas[tema] = preferencia_temas.get(tema, 0) + (1 if sucesso_para_preferencia_tema else -1)
+
             logger.info(
-                "Prototipo/Execução de %s resultou em %.2f (Link produto: %s)",
+                "Prototipo/Execução de IDEIA '%s' concluído. Resultado financeiro: %.2f. Sucesso para tema: %s. Link produto: %s",
                 ideia.descricao,
                 ideia.resultado,
+                sucesso_para_preferencia_tema,
                 ideia.link_produto if ideia.link_produto else "N/A"
             )
             ed.registrar_evento(
-                f"Prototipo/Execução de {ideia.descricao} resultou em {ideia.resultado:.2f}. Link: {ideia.link_produto if ideia.link_produto else 'N/A'}"
+                f"Prototipo/Execução IDEIA '{ideia.descricao}'. Resultado: {ideia.resultado:.2f}. Sucesso p/ tema: {sucesso_para_preferencia_tema}. Link: {ideia.link_produto if ideia.link_produto else 'N/A'}"
             )
 
 
 def executar_ciclo_criativo() -> None:
     """Executa um ciclo completo de ideação, validação e prototipagem para produtos e serviços."""
 
-    # --- PRODUTOS ---
-    ideias_de_produto = propor_ideias() # Focado em produtos
-    if not ideias_de_produto:
-        if ed.MODO_VIDA_INFINITA: # Lógica de fallback para produtos
-            ed.registrar_evento("VIDA INFINITA: Gerando 3 ideias de PRODUTO automáticas.")
-            logger.info("VIDA INFINITA: Nenhuma ideia de PRODUTO proposta por agentes. Gerando 3 ideias automáticas.")
-            # ... (código de geração de ideias automáticas de produto mantido como antes)
+    # --- IDEAÇÃO (Produtos e Serviços) ---
+    # A função propor_ideias() agora lida com ambos e adiciona diretamente aos históricos.
+    # Portanto, não retorna mais uma lista para ser processada aqui.
+    # Ela também registra os eventos e logs internamente.
+    propor_ideias() # Esta função agora popula historico_ideias e historico_servicos
+
+    # Lógica de fallback se nenhum produto ou serviço foi proposto por LLMs
+    # Produtos:
+    if not any(i for i in historico_ideias if i.executada is False): # Verifica se há novas ideias de produto não processadas
+        if ed.MODO_VIDA_INFINITA:
+            ed.registrar_evento("VIDA INFINITA: Gerando 3 ideias de PRODUTO automáticas (fallback).")
+            logger.info("VIDA INFINITA: Nenhuma ideia de PRODUTO nova proposta por agentes. Gerando 3 ideias automáticas.")
             ideias_automaticas_produto = [
-                Ideia(descricao="Produto Automático VIDA INFINITA: Super App", autor="Sistema Infinito"),
-                Ideia(descricao="Produto Automático VIDA INFINITA: Colonizador Espacial", autor="Sistema Infinito"),
-                Ideia(descricao="Produto Automático VIDA INFINITA: IA Consciente", autor="Sistema Infinito")
+                Ideia(descricao="Produto Automático VIDA INFINITA: Super App vNext", autor="Sistema Infinito"),
+                Ideia(descricao="Produto Automático VIDA INFINITA: Colonizador Espacial MkII", autor="Sistema Infinito"),
+                Ideia(descricao="Produto Automático VIDA INFINITA: IA Consciente Beta", autor="Sistema Infinito")
             ]
-            ideias_de_produto.extend(ideias_automaticas_produto)
+            for ia_p in ideias_automaticas_produto:
+                if ia_p not in historico_ideias: historico_ideias.append(ia_p)
         else:
             ideia_automatica_produto = Ideia(
-                descricao="Ideia de produto genérica de otimização",
-                justificativa="Otimização de processos internos como produto.",
-                autor="Sistema Criativo Automático (Produto)"
+                descricao="Ideia de produto genérica de otimização (fallback)",
+                justificativa="Otimização de processos internos como produto (fallback).",
+                autor="Sistema Criativo Automático (Produto Fallback)"
             )
-            ideias_de_produto.append(ideia_automatica_produto)
-            ed.registrar_evento(f"Ideia de PRODUTO automática gerada: {ideia_automatica_produto.descricao}")
-            logger.info("Nenhuma ideia de PRODUTO proposta por agentes. Gerada ideia automática: %s", ideia_automatica_produto.descricao)
+            if ideia_automatica_produto not in historico_ideias:
+                historico_ideias.append(ideia_automatica_produto)
+                ed.registrar_evento(f"Ideia de PRODUTO automática (fallback) gerada: {ideia_automatica_produto.descricao}")
+                logger.info("Nenhuma ideia de PRODUTO nova proposta por agentes. Gerada ideia automática (fallback): %s", ideia_automatica_produto.descricao)
 
-    validar_ideias(ideias_de_produto) # Valida apenas produtos
-    prototipar_ideias(ideias_de_produto) # Prototipa apenas produtos
+    # Serviços:
+    # `propor_ideias` já lida com serviços. `propor_servicos` pode ser removida ou integrada.
+    # Por agora, vamos verificar se `propor_ideias` adicionou algum serviço novo.
+    # Consideramos "novo" um serviço que está no status 'proposed'.
+    novos_servicos_propostos_no_ciclo = [s for s in historico_servicos if s.status == "proposed"]
 
-    # Adiciona todas as ideias de produto (novas e as que já estavam no histórico e foram re-processadas)
-    # É importante garantir que não haja duplicatas se `propor_ideias` puder retornar ideias já existentes.
-    # A lógica atual de `propor_ideias` sempre cria novas.
-    for ideia_p in ideias_de_produto:
-        if ideia_p not in historico_ideias: # Evita duplicatas se a lógica de proposta mudar
-            historico_ideias.append(ideia_p)
+    if not novos_servicos_propostos_no_ciclo:
+        if ed.MODO_VIDA_INFINITA:
+            ed.registrar_evento("VIDA INFINITA: Gerando 1 proposta de SERVIÇO automática (fallback).")
+            logger.info("VIDA INFINITA: Nenhuma proposta de SERVIÇO nova. Gerando 1 proposta automática (fallback).")
+            servico_automatico = Service(
+                service_name="Consultoria Estratégica de IA (Automático VI Fallback)",
+                description="Serviço de consultoria automática para empresas que buscam otimizar com IA (fallback).",
+                author="Sistema Criativo Infinito (Serviço Fallback)",
+                required_skills=["Consultor", "Analista IA"],
+                estimated_effort_hours=20,
+                pricing_model="fixed_price",
+                price_amount=1000.0
+            )
+            if servico_automatico not in historico_servicos: # Evita duplicatas
+                historico_servicos.append(servico_automatico)
+        # else: # Não há fallback automático para serviços no modo normal ainda, a menos que queiramos adicionar.
+        #     logger.info("Nenhum serviço novo proposto neste ciclo (nem fallback).")
 
-    # --- SERVIÇOS ---
-    servicos_propostos = propor_servicos()
-    if not servicos_propostos and not ed.MODO_VIDA_INFINITA: # Não há fallback automático para serviços no modo normal ainda
-        logger.info("Nenhum serviço proposto neste ciclo.")
-    elif not servicos_propostos and ed.MODO_VIDA_INFINITA:
-        ed.registrar_evento("VIDA INFINITA: Gerando 1 proposta de SERVIÇO automática.")
-        logger.info("VIDA INFINITA: Nenhuma proposta de SERVIÇO. Gerando 1 proposta automática.")
-        servico_automatico = Service(
-            service_name="Consultoria Estratégica de IA (Automático VI)",
-            description="Serviço de consultoria automática para empresas que buscam otimizar com IA.",
-            author="Sistema Criativo Infinito (Serviço)",
-            required_skills=["Consultor", "Analista IA"],
-            estimated_effort_hours=20,
-            pricing_model="fixed_price",
-            price_amount=1000.0
-        )
-        servicos_propostos.append(servico_automatico)
 
-    validar_servicos(servicos_propostos)
+    # --- VALIDAÇÃO (Unificada) ---
+    # Coleta todas as ideias e serviços que precisam de validação
+    ideias_necessitando_validacao = [i for i in historico_ideias if not i.validada and not i.executada]
+    servicos_necessitando_validacao = [s for s in historico_servicos if s.status == "proposed"]
 
-    # Adiciona todos os serviços propostos (novos) ao histórico de serviços.
-    # Similar às ideias, garantir que não haja duplicatas se a lógica mudar.
-    for servico_p in servicos_propostos:
-        if servico_p not in historico_servicos: # Evita duplicatas
-            historico_servicos.append(servico_p)
+    if ideias_necessitando_validacao or servicos_necessitando_validacao:
+        logger.info(f"Iniciando validação para {len(ideias_necessitando_validacao)} ideias e {len(servicos_necessitando_validacao)} serviços.")
+        validar_propostas(ideias_necessitando_validacao, servicos_necessitando_validacao)
+    else:
+        logger.info("Nenhuma ideia ou serviço necessitando validação neste ciclo.")
+
+    # --- PROTOTIPAGEM (Apenas Produtos por enquanto) ---
+    # Prototipa ideias de produto validadas e ainda não executadas.
+    ideias_para_prototipar = [i for i in historico_ideias if i.validada and not i.executada]
+    if ideias_para_prototipar:
+        prototipar_ideias(ideias_para_prototipar)
+    else:
+        logger.info("Nenhuma ideia de produto validada para prototipar neste ciclo.")
+
+
+    # A remoção da função propor_servicos() e a integração completa de sua lógica
+    # em propor_ideias() significa que não precisamos mais chamar propor_servicos() separadamente.
+    # A função executar_ciclo_criativo agora usa diretamente os históricos que são
+    # populados por propor_ideias().
 
     # NOTA: A "prototipagem" ou execução de serviços não está implementada aqui.
     # Isso exigiria uma lógica separada (ex: `executar_servicos_validados`).
-    # Por enquanto, o ciclo criativo para serviços vai até a validação.
 
     # Salvar históricos pode ser feito centralmente em empresa_digital.py após o ciclo.
-    logger.info(f"Ciclo criativo concluído. Ideias de produto: {len(ideias_de_produto)}, Serviços propostos: {len(servicos_propostos)}")
+    num_novas_ideias = len([i for i in historico_ideias if not i.executada]) # Aproximação de "novas" ou "ativas"
+    num_novos_servicos = len([s for s in historico_servicos if s.status == 'proposed' or s.status == 'validated' or s.status == 'in_progress']) # Aproximação
+    logger.info(f"Ciclo criativo concluído. Ideias de produto ativas: {num_novas_ideias}, Serviços propostos/ativos: {num_novos_servicos}")
+
+
+def executar_servicos_validados() -> None:
+    """
+    Gerencia a execução de serviços validados, incluindo atribuição automática e simulação de progresso.
+    """
+    logger.info("Iniciando execução de serviços validados...")
+    agentes_executores_disponiveis = [
+        ag for ag_nome, ag in ed.agentes.items()
+        if ag.funcao.lower() == "executor" and (not ag.objetivo_atual or "aguardando" in ag.objetivo_atual.lower())
+    ]
+
+    # Determinar o fator de horas por ciclo
+    current_hours_per_cycle = ed.HOURS_PER_CYCLE_FACTOR_VIDA_INFINITA if ed.MODO_VIDA_INFINITA else ed.HOURS_PER_CYCLE_FACTOR
+
+    for servico in historico_servicos:
+        if servico.status == "validated":
+            servico.cycles_unassigned += 1
+            logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) está validado há {servico.cycles_unassigned} ciclos.")
+            if servico.cycles_unassigned >= 2:
+                agente_atribuido = None
+                if agentes_executores_disponiveis:
+                    agente_atribuido = agentes_executores_disponiveis.pop(0) # Pega o primeiro executor livre
+                    logger.info(f"Executor existente '{agente_atribuido.nome}' encontrado para o serviço '{servico.service_name}'.")
+                else:
+                    logger.info(f"Nenhum Executor livre. Contratando novo Executor para o serviço '{servico.service_name}'.")
+                    # Usar rh.py para contratar seria ideal, mas por agora, criamos diretamente.
+                    # Assumindo que rh.py tem uma função como modulo_rh.contratar_agente_especializado
+                    # ou usamos ed.criar_agente diretamente.
+                    novo_executor_nome = f"Executor_{servico.service_name[:10].replace(' ', '_')}_{uuid.uuid4().hex[:4]}"
+
+                    # Definir um local padrão para o novo agente, ex: o primeiro local da lista ou um específico
+                    local_padrao_para_novos_agentes = list(ed.locais.keys())[0] if ed.locais else None
+                    if not local_padrao_para_novos_agentes:
+                        logger.error("Não há locais definidos. Impossível criar novo Executor.")
+                        continue # Pula este serviço se não puder criar agente
+
+                    modelo_llm_executor, _ = ed.selecionar_modelo("Executor", f"Executar serviço {servico.service_name}")
+
+                    try:
+                        agente_atribuido = ed.criar_agente(
+                            nome=novo_executor_nome,
+                            funcao="Executor",
+                            modelo_llm=modelo_llm_executor,
+                            local=local_padrao_para_novos_agentes, # Precisa ser um nome de local
+                            objetivo=f"Executar serviço: {servico.service_name} (ID: {servico.id})"
+                        )
+                        logger.info(f"Novo Executor '{agente_atribuido.nome}' contratado e atribuído ao serviço '{servico.service_name}'.")
+                        ed.registrar_evento(f"Novo Executor '{agente_atribuido.nome}' contratado para '{servico.service_name}'.")
+                    except ValueError as e:
+                        logger.error(f"Falha ao criar novo Executor para o serviço '{servico.service_name}': {e}")
+                        continue # Pula este serviço
+
+                if agente_atribuido:
+                    servico.assign_agent(agente_atribuido.nome, message="Auto-atribuído pelo sistema após 2 ciclos de espera.")
+                    agente_atribuido.objetivo_atual = f"Executar serviço: {servico.service_name} (ID: {servico.id})"
+                    logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) auto-atribuído a '{agente_atribuido.nome}'.")
+                    ed.registrar_evento(f"Serviço '{servico.service_name}' auto-atribuído a '{agente_atribuido.nome}'. Objetivo atualizado.")
+                    # servico.cycles_unassigned = 0 # assign_agent já faz isso
+            else:
+                logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) aguardando atribuição por mais {2 - servico.cycles_unassigned} ciclos.")
+
+        elif servico.status == "in_progress" and servico.assigned_agent_name:
+            if servico.assigned_agent_name not in ed.agentes:
+                logger.warning(f"Agente '{servico.assigned_agent_name}' atribuído ao serviço '{servico.service_name}' (ID: {servico.id}) não encontrado. Serviço parado.")
+                # Opcional: Mudar status para 'paused' ou 'problem'
+                # servico.update_status("problem", "Agente atribuído não existe mais.")
+                continue
+
+            agente_executor = ed.agentes[servico.assigned_agent_name]
+            servico.progress_hours += current_hours_per_cycle
+            logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}): Progresso {servico.progress_hours:.2f}/{servico.estimated_effort_hours} horas por {agente_executor.nome}.")
+            servico.history.append({ # Adicionar log de progresso ao histórico do serviço
+                "timestamp": str(time.time()),
+                "status": "in_progress",
+                "message": f"Progresso: {servico.progress_hours:.2f}/{servico.estimated_effort_hours}h. Agente: {agente_executor.nome}"
+            })
+
+
+            if servico.progress_hours >= servico.estimated_effort_hours:
+                servico.complete_service(message="Concluído via simulação de progresso.")
+                logger.info(f"Serviço '{servico.service_name}' (ID: {servico.id}) CONCLUÍDO por {agente_executor.nome}.")
+                ed.registrar_evento(f"Serviço '{servico.service_name}' (ID: {servico.id}) CONCLUÍDO por {agente_executor.nome}.")
+
+                # Limpar objetivo do agente
+                if agente_executor.objetivo_atual == f"Executar serviço: {servico.service_name} (ID: {servico.id})":
+                    agente_executor.objetivo_atual = "Aguardando novas atribuições."
+                    logger.info(f"Objetivo de {agente_executor.nome} resetado para 'Aguardando novas atribuições'.")
+                    ed.registrar_evento(f"Objetivo de {agente_executor.nome} resetado.")
+                # A receita será calculada em ed.calcular_lucro_ciclo()
+    logger.info("Execução de serviços validados concluída.")
