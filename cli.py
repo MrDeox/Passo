@@ -1,86 +1,41 @@
-import os
-import sys
-from pathlib import Path
-from getpass import getpass
 import argparse
-import requests
+import sys
+import logging
+import empresa_digital as ed # Assuming empresa_digital.py is in the same package or PYTHONPATH
 
-ROOT = Path(__file__).parent
-KEY_FILE = ROOT / ".openrouter_key"
-DEFAULT_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+# Configure logging at the CLI entry point
+# This basic configuration can be expanded or moved if a more complex logging setup is needed.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s:%(lineno)d - %(message)s')
 
-
-def ensure_api_key() -> str:
-    """Garantir que a OpenRouter API Key esteja configurada."""
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if key:
-        return key.strip()
-    if KEY_FILE.exists():
-        key = KEY_FILE.read_text().strip()
-    else:
-        key = getpass("Digite sua OpenRouter API Key: ")
-        KEY_FILE.write_text(key)
-    os.environ["OPENROUTER_API_KEY"] = key
-    return key
-
-
-def list_agents(base_url: str) -> None:
-    resp = requests.get(f"{base_url}/agentes", timeout=10)
-    resp.raise_for_status()
-    for ag in resp.json():
-        print(f"- {ag['nome']} ({ag['funcao']}) - {ag['local_atual']}")
-
-
-def list_rooms(base_url: str) -> None:
-    resp = requests.get(f"{base_url}/locais", timeout=10)
-    resp.raise_for_status()
-    for loc in resp.json():
-        print(f"- {loc['nome']}: {loc['descricao']}")
-
-
-def run_cycle(base_url: str) -> None:
-    resp = requests.post(f"{base_url}/ciclo/next", timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    print("Saldo:", data["saldo"])
-    print("Eventos:")
-    for e in data.get("eventos", []):
-        print("  ", e)
-
-
-def list_models(base_url: str) -> None:
-    ensure_api_key()
-    resp = requests.get(f"{base_url}/modelos-livres", timeout=10)
-    resp.raise_for_status()
-    for m in resp.json():
-        print("-", m)
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="CLI para Empresa Digital")
+def main():
+    parser = argparse.ArgumentParser(description="Simulador de Empresa Digital Autônoma")
     parser.add_argument(
-        "command",
-        choices=["agentes", "locais", "ciclo", "modelos"],
-        help="Acao a executar",
+        "--cycles", "-c", type=int, default=0,
+        help="Número de ciclos para executar. 0 ou negativo para execução infinita (padrão: 0)."
     )
     parser.add_argument(
-        "--url",
-        default=DEFAULT_URL,
-        help="URL base do backend (padrao: http://localhost:8000)",
+        "--resume", "-r", action="store_true",
+        help="Retomar a simulação do estado salvo."
     )
+    # Example: Add other arguments if needed in the future
+    # parser.add_argument(
+    #     "--config-file", type=str, help="Caminho para o arquivo de configuração da simulação."
+    # )
+
     args = parser.parse_args()
 
-    if args.command == "agentes":
-        list_agents(args.url)
-    elif args.command == "locais":
-        list_rooms(args.url)
-    elif args.command == "ciclo":
-        run_cycle(args.url)
-    elif args.command == "modelos":
-        list_models(args.url)
-    else:
-        parser.print_help()
-
+    try:
+        # Pass arguments to the main simulation entry point function in empresa_digital.py
+        ed.run_simulation_entry_point(num_cycles=args.cycles, resume_flag=args.resume)
+    except KeyboardInterrupt:
+        # This top-level KeyboardInterrupt is a fallback if the one in run_simulation_entry_point doesn't catch it first
+        # or if the interrupt happens outside the main loop managed there.
+        logging.info("Simulação interrompida externamente (Ctrl-C).")
+        # Consider if saving is needed here; run_simulation_entry_point should handle its own saving.
+        sys.exit(0)
+    except Exception as e:
+        logging.critical(f"Erro fatal não tratado na execução da simulação: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

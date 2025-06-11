@@ -1,5 +1,20 @@
-from dataclasses import dataclass, field # field might be needed if Ideia uses default_factory
-from typing import Optional, List, Dict # For attributes of Ideia and other future types
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict
+import re # For slug generation
+import uuid # For Task and Service IDs
+import time # For Task and Service history timestamps
+
+# Helper function for slug generation (can be outside or static method if preferred)
+def _generate_slug(text: str) -> str:
+    if not text:
+        return "untitled-idea"
+    # Remove accents and special characters (keeping alphanumeric, spaces, hyphens)
+    s = re.sub(r'[^\w\s-]', '', text.lower())
+    # Replace whitespace and multiple hyphens with a single hyphen
+    s = re.sub(r'[-\s]+', '-', s).strip('-')
+    if not s: # If all characters were special and removed
+        return "untitled-idea-" + uuid.uuid4().hex[:6]
+    return s[:50] # Limit length
 
 @dataclass
 class Ideia:
@@ -21,6 +36,10 @@ class Ideia:
     # Se Ideia precisar de métodos ou ser mais complexa, pode evoluir aqui.
     # Por agora, é uma simples dataclass para transferência de dados.
 
+    @property
+    def slug(self) -> str:
+        return _generate_slug(self.descricao)
+
 # Poderíamos também mover outras dataclasses compartilhadas aqui no futuro,
 # como definições base para Agente ou Local, se isso ajudar a quebrar outras dependências,
 # mas por agora, apenas Ideia é o foco para resolver a dependência circular imediata.
@@ -31,8 +50,7 @@ class Ideia:
 # empresa_digital.py chama essas funções, o que é uma dependência aceitável.
 # O problema principal era a dependência de tipo (Ideia) entre os módulos.
 
-import uuid
-import time
+# uuid and time imports are already present due to Service and Task dataclasses.
 
 @dataclass
 class Service:
@@ -52,6 +70,8 @@ class Service:
     assigned_agent_name: Optional[str] = None
     delivery_start_timestamp: Optional[float] = None
     revenue_calculated: bool = False # New field
+    cycles_unassigned: int = 0 # New field for tracking validated but unassigned cycles
+    progress_hours: float = 0.0 # New field for tracking progress on service execution
 
 
     def __post_init__(self):
@@ -88,17 +108,54 @@ class Service:
         if self.status == "validated":
             self.assigned_agent_name = agent_name
             self.delivery_start_timestamp = time.time()
+            self.progress_hours = 0.0 # Reset progress upon assignment/re-assignment
+            self.cycles_unassigned = 0 # Reset unassigned counter
             log_message = message or f"Assigned to agent {agent_name}"
             self.update_status("in_progress", log_message)
         else:
             # Potentially raise an error or log a warning if trying to assign a non-validated service
-            print(f"Warning: Tried to assign agent to service {self.id} with status {self.status}. Expected 'validated'.") # Or use logger
+            # Using print for now, should ideally be logger for consistency
+            print(f"Warning: Tried to assign agent to service {self.id} (status: {self.status}). Expected 'validated'.")
 
     def complete_service(self, message: str = ""):
         if self.status == "in_progress":
             log_message = message or "Service marked as completed"
-            self.update_status("completed", log_message)
             # self.completion_timestamp is set by update_status
+            # self.revenue_calculated should be False by default, will be set to True by billing logic
+            self.update_status("completed", log_message)
         else:
             # Potentially raise an error or log a warning
-            print(f"Warning: Tried to complete service {self.id} with status {self.status}. Expected 'in_progress'.") # Or use logger
+            print(f"Warning: Tried to complete service {self.id} (status: {self.status}). Expected 'in_progress'.")
+
+# Need to ensure time is imported if not already, for Task.update_status
+# import time # Already imported at the top level of the original core_types.py
+
+@dataclass
+class Task:
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    description: str
+    status: str = "todo"  # "todo", "in_progress", "done"
+    history: List[Dict[str, str]] = field(default_factory=list) # To log status changes or agent assignments
+
+    def update_status(self, new_status: str, message: str = ""):
+        # time is imported at the top level of this file
+        valid_statuses = ["todo", "in_progress", "done"]
+        if new_status not in valid_statuses:
+            # In a real app, might use logging.error or raise ValueError
+            print(f"Error: Attempted to set invalid status '{new_status}' for task '{self.id}'. Valid statuses are: {valid_statuses}")
+            return
+
+        old_status = self.status
+        self.status = new_status
+        timestamp = time.time() # Using numeric timestamp for consistency with Service
+
+        log_entry = {
+            "timestamp": str(timestamp),
+            "status": new_status,
+            "message": message or f"Status changed from {old_status} to {new_status}"
+        }
+        self.history.append(log_entry)
+        # Consider global event logging if needed:
+        # import empresa_digital as ed # Would create circular import if done at top level
+        # ed.registrar_evento(f"Task '{self.description[:30]}...' (ID: {self.id}) status updated to {new_status}. Message: {message}")
+        # For now, history on the object is primary. Global logging can be done by the caller.

@@ -16,6 +16,7 @@ import logging
 import random  # Adicionado para seleção aleatória de agentes
 import time  # Adicionado para o backoff exponencial
 import requests  # Adicionado para chamadas HTTP
+import uuid # Adicionado para gerar IDs para tarefas antigas, se necessário
 # import json # Já importado acima
 # import logging # Já importado acima
 
@@ -30,8 +31,8 @@ from openrouter_utils import obter_api_key
 # Módulo ciclo_criativo importado com alias para evitar conflitos e usado para acessar seus membros.
 import ciclo_criativo as cc
 # Acesso direto a historico_ideias e historico_servicos para conveniência onde usado.
-from ciclo_criativo import historico_ideias, historico_servicos
-
+from ciclo_criativo import historico_ideias, historico_servicos # Ensure these are used if direct access is intended
+from dataclasses import asdict # For serializing dataclass objects like Task
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,8 @@ saldo: float = 0.0
 historico_saldo: List[float] = []
 
 # Lista global de tarefas pendentes que podem ser atribuídas a novos agentes
-tarefas_pendentes: List[str] = []
+from .core_types import Task # Import Task dataclass
+tarefas_pendentes: List[Task] = []
 
 # Dicionários globais para armazenar os agentes e os locais cadastrados.
 agentes: Dict[str, "Agente"] = {}
@@ -127,6 +129,8 @@ class Agente:
     objetivo_atual: str = ""
     feedback_ceo: str = ""
     estado_emocional: int = 0
+    actions_successful_for_objective: int = 0 # New field for tracking task progress
+    cycles_idle: int = 0 # New field for tracking Executor idle cycles
 
     def mover_para(self, novo_local: Local) -> None:
         """Move o agente para um novo local, atualizando todas as referências."""
@@ -230,8 +234,8 @@ def inicializar_automaticamente() -> None:
             "Agente criado: %s em %s como %s", nome, sala, funcao
         )
 
-    tarefas_pendentes.append("Planejar estratégia de lançamento")
-    logging.info("Tarefa inicial registrada: Planejar estratégia de lançamento")
+    adicionar_tarefa("Planejar estratégia de lançamento") # Uses the new function
+    # logging.info already done by adicionar_tarefa
 
 
 # ---------------------------------------------------------------------------
@@ -301,22 +305,25 @@ def mover_agente(nome_agente: str, nome_novo_local: str) -> None:
     agente.mover_para(novo_local)
 
 
-def adicionar_tarefa(tarefa: str) -> None:
-    """Registra uma nova tarefa pendente."""
-    tarefas_pendentes.append(tarefa)
+def adicionar_tarefa(descricao_tarefa: str) -> Task:
+    """Cria um objeto Task e o registra na lista de tarefas pendentes."""
+    nova_tarefa = Task(description=descricao_tarefa)
+    tarefas_pendentes.append(nova_tarefa)
+    registrar_evento(f"Nova tarefa '{descricao_tarefa}' adicionada com status 'todo'. ID: {nova_tarefa.id}")
+    logger.info(f"Nova tarefa '{descricao_tarefa}' (ID: {nova_tarefa.id}) adicionada com status 'todo'.")
+    return nova_tarefa
 
 
 def salvar_dados(
     arquivo_agentes: str,
     arquivo_locais: str,
     arquivo_historico_ideias: str = "historico_ideias.json",
-    arquivo_historico_servicos: str = "servicos.json" # Novo parâmetro
+    arquivo_historico_servicos: str = "servicos.json",
+    arquivo_saldo: str = "saldo.json",
+    arquivo_tarefas: str = "tarefas.json",
+    arquivo_eventos: str = "eventos.json"
 ) -> None:
-    """Salva os dicionários globais de agentes, locais, histórico de ideias e serviços em arquivos JSON.
-
-    Somente informações necessárias para reconstrução dos objetos são
-    persistidas (nome do local em que cada agente está, por exemplo).
-    """
+    """Salva os dicionários globais de agentes, locais, históricos, finanças, tarefas e eventos em arquivos JSON."""
 
     # Serializa agentes registrando apenas dados essenciais e o nome do local
     dados_agentes = {
@@ -355,18 +362,73 @@ def salvar_dados(
     # Salvar histórico de serviços
     salvar_historico_servicos(arquivo_historico_servicos)
 
+    # Salvar saldo e historico_saldo
+    try:
+        with open(arquivo_saldo, "w", encoding="utf-8") as f:
+            json.dump({"saldo": saldo, "historico_saldo": historico_saldo}, f, ensure_ascii=False, indent=2)
+        logger.info(f"Dados de saldo salvos em {arquivo_saldo}")
+    except IOError as e:
+        logger.error(f"Erro ao salvar dados de saldo em {arquivo_saldo}: {e}")
+
+    # Salvar tarefas_pendentes (List[Task])
+    try:
+        dados_tarefas = [asdict(task) for task in tarefas_pendentes]
+        with open(arquivo_tarefas, "w", encoding="utf-8") as f:
+            json.dump(dados_tarefas, f, ensure_ascii=False, indent=2)
+        logger.info(f"Tarefas pendentes salvas em {arquivo_tarefas}")
+    except IOError as e:
+        logger.error(f"Erro ao salvar tarefas pendentes em {arquivo_tarefas}: {e}")
+    except TypeError as e: # Handle cases where asdict might fail if Task objects are not simple dataclasses
+        logger.error(f"Erro de tipo ao serializar tarefas: {e}. Verifique a estrutura dos objetos Task.")
+
+
+    # Salvar historico_eventos (List[str])
+    try:
+        with open(arquivo_eventos, "w", encoding="utf-8") as f:
+            json.dump(historico_eventos, f, ensure_ascii=False, indent=2)
+        logger.info(f"Histórico de eventos salvo em {arquivo_eventos}")
+    except IOError as e:
+        logger.error(f"Erro ao salvar histórico de eventos em {arquivo_eventos}: {e}")
+
 
 def carregar_dados(
     arquivo_agentes: str,
     arquivo_locais: str,
     arquivo_historico_ideias: str = "historico_ideias.json",
-    arquivo_historico_servicos: str = "servicos.json" # Novo parâmetro
+    arquivo_historico_servicos: str = "servicos.json",
+    arquivo_saldo: str = "saldo.json",
+    arquivo_tarefas: str = "tarefas.json",
+    arquivo_eventos: str = "eventos.json"
 ) -> None:
-    """Carrega arquivos JSON recriando os dicionários de agentes, locais, histórico de ideias e serviços."""
+    """Carrega arquivos JSON recriando os dicionários de agentes, locais, históricos, finanças, tarefas e eventos."""
 
-    global agentes, locais
+    global agentes, locais, saldo, historico_saldo, tarefas_pendentes, historico_eventos
+    # Resetar estados que serão totalmente preenchidos pelos arquivos
     agentes = {}
     locais = {}
+    # Saldo, historico_saldo, tarefas_pendentes, historico_eventos são resetados/inicializados abaixo
+    # antes de carregar ou com defaults se o arquivo não existir.
+
+    # Carregar saldo e historico_saldo
+    try:
+        with open(arquivo_saldo, "r", encoding="utf-8") as f:
+            dados_saldo_json = json.load(f)
+            saldo = dados_saldo_json.get("saldo", 0.0)
+            historico_saldo = dados_saldo_json.get("historico_saldo", [])
+        logger.info(f"Dados de saldo carregados de {arquivo_saldo}.")
+    except FileNotFoundError:
+        logger.warning(f"Arquivo de saldo '{arquivo_saldo}' não encontrado. Usando saldo inicial padrão (0.0) e histórico vazio.")
+        saldo = 0.0
+        historico_saldo = []
+    except json.JSONDecodeError as e:
+        logger.error(f"Erro ao decodificar JSON do arquivo de saldo '{arquivo_saldo}': {e}. Usando defaults.")
+        saldo = 0.0
+        historico_saldo = []
+    except Exception as e:
+        logger.error(f"Erro inesperado ao carregar arquivo de saldo '{arquivo_saldo}': {e}. Usando defaults.")
+        saldo = 0.0
+        historico_saldo = []
+
 
     # Carrega primeiro os locais, pois os agentes dependem deles
     with open(arquivo_locais, "r", encoding="utf-8") as f:
@@ -467,6 +529,67 @@ def carregar_dados(
     carregar_historico_ideias(arquivo_historico_ideias)
     # Carregar histórico de serviços
     carregar_historico_servicos(arquivo_historico_servicos)
+
+    # Carregar tarefas_pendentes
+    try:
+        with open(arquivo_tarefas, "r", encoding="utf-8") as f:
+            dados_tarefas_json = json.load(f)
+
+        temp_tarefas_pendentes = []
+        for task_data in dados_tarefas_json:
+            if isinstance(task_data, str): # Backward compatibility: old format was List[str]
+                task_obj = Task(description=task_data, status="todo") # Default status
+                registrar_evento(f"Tarefa antiga '{task_data}' convertida para novo formato Task ID: {task_obj.id}.")
+                logger.info(f"Tarefa antiga '{task_data}' convertida para novo formato Task (ID: {task_obj.id}).")
+            elif isinstance(task_data, dict): # New format: List[Dict]
+                # Ensure all necessary fields are present or provide defaults
+                # This is important if the Task dataclass evolves
+                task_description = task_data.get("description")
+                if not task_description:
+                    logger.warning(f"Tarefa carregada sem descrição: {task_data.get('id', 'ID Desconhecido')}. Pulando.")
+                    continue
+
+                task_obj = Task(
+                    id=task_data.get("id", uuid.uuid4().hex), # Generate new ID if missing
+                    description=task_description,
+                    status=task_data.get("status", "todo"),
+                    history=task_data.get("history", [])
+                )
+            else:
+                logger.warning(f"Formato de dado de tarefa desconhecido encontrado: {type(task_data)}. Pulando.")
+                continue
+            temp_tarefas_pendentes.append(task_obj)
+        tarefas_pendentes = temp_tarefas_pendentes
+        logger.info(f"Tarefas pendentes carregadas de {arquivo_tarefas}. {len(tarefas_pendentes)} tarefas carregadas.")
+    except FileNotFoundError:
+        logger.warning(f"Arquivo de tarefas '{arquivo_tarefas}' não encontrado. Lista de tarefas pendentes iniciada vazia.")
+        tarefas_pendentes = []
+    except json.JSONDecodeError as e:
+        logger.error(f"Erro ao decodificar JSON do arquivo de tarefas '{arquivo_tarefas}': {e}. Lista de tarefas vazia.")
+        tarefas_pendentes = []
+    except Exception as e:
+        logger.error(f"Erro inesperado ao carregar arquivo de tarefas '{arquivo_tarefas}': {e}. Lista de tarefas vazia.")
+        tarefas_pendentes = []
+
+    # Carregar historico_eventos
+    try:
+        with open(arquivo_eventos, "r", encoding="utf-8") as f:
+            loaded_eventos = json.load(f)
+            if isinstance(loaded_eventos, list):
+                historico_eventos = loaded_eventos
+            else:
+                logger.error(f"Arquivo de eventos '{arquivo_eventos}' não contém uma lista. Histórico de eventos iniciado vazio.")
+                historico_eventos = []
+        logger.info(f"Histórico de eventos carregado de {arquivo_eventos}. {len(historico_eventos)} eventos carregados.")
+    except FileNotFoundError:
+        logger.warning(f"Arquivo de eventos '{arquivo_eventos}' não encontrado. Histórico de eventos iniciado vazio.")
+        historico_eventos = []
+    except json.JSONDecodeError as e:
+        logger.error(f"Erro ao decodificar JSON do arquivo de eventos '{arquivo_eventos}': {e}. Histórico de eventos vazio.")
+        historico_eventos = []
+    except Exception as e:
+        logger.error(f"Erro inesperado ao carregar arquivo de eventos '{arquivo_eventos}': {e}. Histórico de eventos vazio.")
+        historico_eventos = []
 
 
 def calcular_lucro_ciclo() -> dict:
@@ -1025,6 +1148,90 @@ def executar_resposta(agente: Agente, resposta: str) -> None:
             logging.warning(msg)
             agente.registrar_acao(f"propor_tarefa -> falha (não autorizado)", False)
 
+    # Após a execução bem-sucedida de uma ação (ficar, mover, mensagem),
+    # verificar se o agente é um Executor e se está trabalhando em uma tarefa.
+    # Este bloco é executado se agente.registrar_acao(..., sucesso=True) foi chamado.
+    # Precisamos garantir que a ação foi bem sucedida antes de contar para o progresso da tarefa.
+    # A chamada `agente.registrar_acao` já aconteceu acima para cada tipo de ação.
+    # Vamos verificar o último histórico de ação para inferir sucesso, ou melhor,
+    # o estado emocional pode ser um proxy se `registrar_acao` o atualiza consistentemente.
+    # No entanto, `registrar_acao` recebe um booleano `sucesso`.
+    # A lógica de task progress deve ser acionada APENAS SE a ação específica (ficar, mover, mensagem) foi bem sucedida.
+
+    # Para simplificar, vamos assumir que se chegamos até aqui sem um fallback para "ficar" que registrou Falha,
+    # a ação principal foi considerada "ok" em seu próprio bloco.
+    # A forma mais limpa seria ter o bloco de `registrar_acao` retornar o status de sucesso,
+    # mas para evitar refatoração profunda agora, vamos adicionar a lógica de progresso de tarefa aqui,
+    # assumindo que se uma ação específica (ficar, mover, mensagem) foi executada e não caiu em um de seus próprios fallbacks
+    # que chamaram `agente.registrar_acao(..., False)`, ela foi um sucesso.
+    # Melhor ainda: verificar se a ÚLTIMA ação registrada foi um sucesso.
+    # O `agente.registrar_acao` já ajusta `estado_emocional`.
+    # E `actions_successful_for_objective` deve ser incrementado apenas se a ação principal foi um sucesso.
+
+    # A lógica de registrar_acao(..., sucesso=True) já foi chamada para as ações acima.
+    # Agora, verificamos se essa ação bem-sucedida contribui para uma tarefa.
+    # A maneira mais robusta é verificar se a última ação registrada foi bem-sucedida.
+    # No entanto, `agente.registrar_acao` não retorna o status de sucesso.
+    # Vamos adicionar o incremento de `actions_successful_for_objective` dentro de cada bloco de ação bem-sucedida.
+    # Isso já foi feito para "mensagem". Precisa ser adicionado para "ficar" e "mover" se forem bem-sucedidas.
+
+    # REVISÃO: A lógica de incremento de `actions_successful_for_objective` já foi colocada
+    # (erroneamente) apenas dentro do bloco "mensagem".
+    # CORREÇÃO: Mover a lógica de incremento e checagem de conclusão de tarefa para fora dos blocos de ação específicos,
+    # mas condicioná-la ao sucesso da ação principal do agente.
+    # A maneira mais simples de fazer isso sem refatorar `registrar_acao` é verificar se
+    # o estado emocional aumentou ou se a última entrada no histórico de ações indica sucesso.
+    # Porém, a forma mais direta é fazer isso após cada chamada `agente.registrar_acao(..., True)`.
+
+    # A estrutura atual de `executar_resposta` chama `agente.registrar_acao` em múltiplos lugares,
+    # incluindo para fallbacks. Precisamos de um ponto central após uma ação principal bem-sucedida.
+
+    # Solução: Adicionar um marcador/flag ou checar a descrição da última ação.
+    # Ou, mais simples: se a ação não foi um fallback que resultou em `registrar_acao(..., False)`,
+    # e o agente é um executor com task_id, incrementamos.
+
+    # Vamos adicionar uma variável local `acao_principal_bem_sucedida`
+    acao_principal_bem_sucedida = False
+    if acao == "ficar" and "ficar -> ok" in agente.historico_acoes[-1]: # Verifica se a última ação foi um 'ficar' bem sucedido
+        acao_principal_bem_sucedida = True
+    elif acao == "mover" and "-> ok" in agente.historico_acoes[-1] and not "fallback" in agente.historico_acoes[-1]: # Movimento bem sucedido
+        acao_principal_bem_sucedida = True
+    elif acao == "mensagem" and "-> ok" in agente.historico_acoes[-1] and not "fallback" in agente.historico_acoes[-1]: # Mensagem bem sucedida
+        acao_principal_bem_sucedida = True
+    # Não contamos 'assign_service' ou 'propor_tarefa' como ações de Executor para completar *sua* tarefa.
+
+    if acao_principal_bem_sucedida and agente.funcao.lower() == "executor" and agente.objetivo_atual.startswith("task_id:"):
+        agente.actions_successful_for_objective += 1
+        logger.info(f"Agente Executor {agente.nome} completou {agente.actions_successful_for_objective} ações para o objetivo {agente.objetivo_atual}.")
+        if agente.actions_successful_for_objective >= 3:
+            try:
+                task_id_from_obj = agente.objetivo_atual.split("task_id:")[1]
+                task_to_complete = next((t for t in tarefas_pendentes if t.id == task_id_from_obj), None)
+                if task_to_complete and task_to_complete.status == "in_progress":
+                    task_to_complete.update_status("done", f"Concluída pelo agente {agente.nome} após {agente.actions_successful_for_objective} ações bem-sucedidas.")
+                    registrar_evento(f"Tarefa '{task_to_complete.description}' (ID: {task_id_from_obj}) marcada como 'done' pelo agente {agente.nome}.")
+                    logger.info(f"Tarefa '{task_to_complete.description}' (ID: {task_id_from_obj}) COMPLETADA por {agente.nome}.")
+                    agente.objetivo_atual = "Aguardando novas atribuições."
+                    agente.actions_successful_for_objective = 0
+                    logger.info(f"Objetivo do agente {agente.nome} resetado. Actions successful resetado.")
+                elif task_to_complete and task_to_complete.status != "in_progress":
+                    logger.warning(f"Agente {agente.nome} tentou completar tarefa '{task_to_complete.description}' (ID: {task_id_from_obj}) mas seu status é '{task_to_complete.status}', não 'in_progress'.")
+                    if task_to_complete.status == "done": # Se a tarefa já foi marcada como done por outro meio
+                        agente.objetivo_atual = "Aguardando novas atribuições."
+                        agente.actions_successful_for_objective = 0
+                elif not task_to_complete:
+                    logger.error(f"Agente {agente.nome} tentou completar tarefa ID '{task_id_from_obj}' mas a tarefa não foi encontrada em tarefas_pendentes.")
+                    agente.objetivo_atual = "Erro: Tarefa do objetivo não encontrada."
+                    agente.actions_successful_for_objective = 0
+            except IndexError:
+                logger.error(f"Erro ao parsear task_id do objetivo '{agente.objetivo_atual}' do agente {agente.nome}.")
+                agente.objetivo_atual = "Erro: Formato de objetivo de tarefa inválido."
+                agente.actions_successful_for_objective = 0
+            except Exception as e:
+                logger.error(f"Erro inesperado ao processar conclusão de tarefa para agente {agente.nome}: {e}", exc_info=True)
+                agente.objetivo_atual = "Erro ao processar conclusão de tarefa."
+                agente.actions_successful_for_objective = 0
+
 
 # ---------------------------------------------------------------------------
 # Exemplo de uso
@@ -1040,132 +1247,179 @@ if __name__ == "__main__":
 
     # Configuração básica de logging para ver INFO e DEBUG messages.
     # Em uma aplicação real, isso pode ser mais configurável.
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+# Import sys for KeyboardInterrupt and sys.exit
+import sys
+# random and time are already imported. ciclo_criativo as cc is also imported.
+from rh import modulo_rh # Ensure rh module is imported
 
-    from rh import modulo_rh
-    # A importação de ciclo_criativo como cc já foi feita no topo do arquivo.
-    # A função cc.executar_ciclo_criativo() será chamada mais abaixo.
+# Global variable to store current cycle number, might be useful for saving/resuming
+ciclo_atual_simulacao: int = 0
 
-    inicializar_automaticamente() # Cria agentes e locais default
+def executar_um_ciclo_completo(ciclo_num: int) -> bool:
+    """
+    Executa todas as operações lógicas para um único ciclo da simulação.
+    Retorna True se o ciclo completou normalmente, False em caso de erro crítico.
+    """
+    global ciclo_atual_simulacao
+    ciclo_atual_simulacao = ciclo_num # Update global cycle counter
 
-    # Carregar dados salvos, se existirem, após a inicialização padrão
-    # ou antes, dependendo da lógica desejada (sobrescrever defaults com salvos).
-    # Para este exemplo, vamos carregar após, o que significa que se os arquivos não existirem,
-    # a inicialização automática prevalece. Se existirem, eles sobrescrevem.
-    # Idealmente, carregar_dados deveria limpar o estado antes de carregar.
-    # A lógica atual de carregar_dados já zera agentes e locais.
-    # E carregar_historico_ideias também zera o histórico antes de carregar.
-
-    # Tentativa de carregar dados salvos. Se não existirem, a empresa continua com a inicialização automática.
-    # Definir nomes de arquivos padrão para salvar/carregar no exemplo.
-    save_file_agentes = "agentes_estado.json"
-    save_file_locais = "locais_estado.json"
-    save_file_ideias = "historico_ideias.json"
-    save_file_servicos = "servicos.json" # Novo arquivo de dados
-
+    logger.info(f"--- Iniciando Ciclo {ciclo_num} ---")
     try:
-        # Passar todos os nomes de arquivo para carregar_dados
-        carregar_dados(save_file_agentes, save_file_locais, save_file_ideias, save_file_servicos)
-        logger.info("Dados da simulação anterior (agentes, locais, ideias, serviços) carregados com sucesso.")
-    except FileNotFoundError:
-        # Isso pode ser mais granular se quisermos saber qual arquivo específico não foi encontrado.
-        # Por enquanto, uma mensagem genérica é suficiente, pois carregar_historico_* já loga warnings.
-        logger.info("Um ou mais arquivos de dados não foram encontrados. Iniciando com estado padrão ou parcial.")
-    except Exception as e:
-        logger.error(f"Erro ao carregar dados salvos: {e}. Iniciando com uma nova simulação.")
-
-
-    for ciclo in range(1, 4):
-        logging.info("=== Ciclo %d ===", ciclo)
-
+        # Gerar tarefas automáticas se não houver pendentes (lógica do loop antigo)
         if not tarefas_pendentes:
             if MODO_VIDA_INFINITA:
-                novas_tarefas = [
-                    "Expandir para novo mercado internacional",
-                    "Desenvolver funcionalidade revolucionária X",
-                    "Criar campanha de marketing viral",
-                    "Otimizar infraestrutura para escala global",
-                    "Pesquisar aquisição de startup promissora"
+                novas_tarefas_desc = [
+                    "Expandir para novo mercado internacional VI",
+                    "Desenvolver funcionalidade revolucionária X VI",
+                    "Criar campanha de marketing viral VI",
+                    "Otimizar infraestrutura para escala global VI",
+                    "Pesquisar aquisição de startup promissora VI"
                 ]
-                registrar_evento("VIDA INFINITA: Gerando 5 tarefas automáticas.")
+                registrar_evento(f"VIDA INFINITA: Gerando {len(novas_tarefas_desc)} tarefas automáticas.")
             else:
-                novas_tarefas = [
+                novas_tarefas_desc = [
                     "Pesquisar novas tecnologias disruptivas",
                     "Analisar feedback de clientes e propor melhorias"
                 ]
-                registrar_evento("Gerando 2 tarefas automáticas padrão.")
+                registrar_evento(f"Gerando {len(novas_tarefas_desc)} tarefas automáticas padrão.")
+            for desc_tarefa in novas_tarefas_desc:
+                adicionar_tarefa(desc_tarefa) # adicionar_tarefa já registra evento
 
-            for nt in novas_tarefas:
-                adicionar_tarefa(nt)
-                registrar_evento(f"Tarefa automática gerada: {nt}")
-
+        # Módulo de RH verifica e contrata se necessário
         modulo_rh.verificar()
-        executar_ciclo_criativo()
 
+        # Ciclo criativo (ideias, validação, prototipagem de produtos)
+        cc.executar_ciclo_criativo()
+
+        # Execução de serviços validados (atribuição, progresso, conclusão)
+        cc.executar_servicos_validados() # Esta função foi criada na Subtask 5
+
+        # Lógica de decisão e ação dos agentes via LLM
         # Selecionar um subconjunto de agentes para processamento LLM neste ciclo
-        # para gerenciar custos de API e tempo de processamento.
         todos_os_agentes = list(agentes.values())
-        # Embaralhar a lista de agentes para garantir que diferentes agentes sejam escolhidos
-        # em ciclos diferentes, promovendo maior variedade nas interações.
-        random.shuffle(todos_os_agentes)
-        # Selecionar o número máximo de agentes definido por MAX_LLM_AGENTS_PER_CYCLE.
-        agentes_para_llm = todos_os_agentes[:MAX_LLM_AGENTS_PER_CYCLE]
+        random.shuffle(todos_os_agentes) # Embaralhar para dar chance a todos ao longo do tempo
 
-        logging.info(
+        # Ajustar MAX_LLM_AGENTS_PER_CYCLE em modo vida infinita para acelerar ou manter como está
+        max_agents_this_cycle = MAX_LLM_AGENTS_PER_CYCLE
+        if MODO_VIDA_INFINITA and MAX_LLM_AGENTS_PER_CYCLE <= 5: # Exemplo: aumentar um pouco em VI se for baixo
+             max_agents_this_cycle = min(len(todos_os_agentes), 10) # Processar mais, até 10 ou todos se menos de 10
+
+        agentes_para_llm = todos_os_agentes[:max_agents_this_cycle]
+
+        logger.info(
             f"Selecionados {len(agentes_para_llm)} de {len(todos_os_agentes)} agentes "
-            f"para processamento LLM neste ciclo (limite: {MAX_LLM_AGENTS_PER_CYCLE})."
+            f"para processamento LLM neste ciclo (limite configurado: {MAX_LLM_AGENTS_PER_CYCLE}, neste ciclo: {max_agents_this_cycle})."
         )
 
-        for agente in agentes_para_llm: # Iterar apenas sobre o subconjunto selecionado.
+        for agente in agentes_para_llm:
+            if agente.funcao.lower() == "executor" and agente.objetivo_atual.startswith("task_id:"):
+                 # Se o executor já tem uma tarefa específica, seu prompt de decisão pode ser diferente
+                 # ou ele pode pular a fase de decisão genérica e focar na execução da tarefa.
+                 # Por agora, vamos permitir que ele tome decisões (ficar, mover, mensagem)
+                 # e o progresso da tarefa é contado por ações bem-sucedidas.
+                 pass # Continua para o prompt de decisão normal
+
             prompt = gerar_prompt_decisao(agente)
             resposta = enviar_para_llm(agente, prompt)
             executar_resposta(agente, resposta)
 
-        # O cálculo de lucro e outras lógicas de fim de ciclo podem continuar considerando todos os agentes
-        # --- SIMULAÇÃO DE ENTREGA DE SERVIÇO ---
-        # Esta lógica pode ser movida para uma função dedicada se ficar complexa.
-        # É executada uma vez por ciclo para todos os serviços em andamento.
-        current_sim_time = time.time() # Usar um tempo de simulação consistente se possível
-
-        # historico_servicos é importado diretamente de ciclo_criativo
-        for servico_obj in historico_servicos: # Renomeado para evitar conflito com módulo 'servico'
-            if servico_obj.status == "in_progress" and servico_obj.delivery_start_timestamp is not None:
-                # Lógica de conclusão baseada em tempo (placeholder)
-                # Esta lógica é um placeholder e precisa de um sistema de tempo de simulação mais robusto.
-                # Assumindo que estimated_effort_hours é em "ciclos" para simplificar por agora.
-                # Ou que um fator de conversão muito simples é aplicado.
-                # Para teste, vamos permitir que complete após alguns ciclos.
-                ciclos_desde_inicio = ciclo - getattr(servico_obj, '_start_cycle', ciclo) # _start_cycle precisaria ser definido na atribuição
-
-                # Simplificação extrema para demonstração:
-                # Se MODO_VIDA_INFINITA, completa mais rápido.
-                # Caso contrário, uma chance de completar.
-                chance_de_completar = 0.0
-                if MODO_VIDA_INFINITA and ciclos_desde_inicio >= 1: # Completa mais rápido em VI
-                    chance_de_completar = 0.75
-                elif ciclos_desde_inicio >= servico_obj.estimated_effort_hours / HOURS_PER_CYCLE_FACTOR : # Uma aproximação grosseira
-                    chance_de_completar = 0.5
-
-                if random.random() < chance_de_completar:
-                    servico_obj.complete_service(f"Concluído (simulação) no ciclo {ciclo}")
-                    registrar_evento(f"Serviço '{servico_obj.service_name}' (ID: {servico_obj.id}) concluído.")
-                    logging.info(f"Serviço '{servico_obj.service_name}' (ID: {servico_obj.id}) concluído.")
-                    # Remover objetivo do agente se o serviço atribuído foi concluído
-                    if servico_obj.assigned_agent_name and servico_obj.assigned_agent_name in agentes:
-                        agente_assignado = agentes[servico_obj.assigned_agent_name]
-                        if agente_assignado.objetivo_atual == f"Executar serviço: {servico_obj.service_name} (ID: {servico_obj.id})":
-                            agente_assignado.objetivo_atual = "Aguardando novas atribuições."
-                            registrar_evento(f"Objetivo de {agente_assignado.nome} resetado após conclusão do serviço.")
-
-
-        # Cálculo de lucro e outras lógicas de fim de ciclo
-        info = calcular_lucro_ciclo() # Agora deve incluir receita de serviços
-        logging.info("Saldo apos ciclo %d: %.2f", ciclo, info["saldo"])
-
-    # Salvar estado final da empresa
-    try:
-        # salvar_dados já usa cc.salvar_historico_servicos internamente
-        salvar_dados(save_file_agentes, save_file_locais, save_file_ideias, save_file_servicos)
-        logger.info("Estado da simulação (agentes, locais, ideias, serviços) salvo com sucesso.")
+        # Calcular lucro/custos do ciclo
+        info_lucro = calcular_lucro_ciclo()
+        logger.info(f"Saldo após ciclo {ciclo_num}: {info_lucro['saldo']:.2f}. Receita ciclo: {info_lucro['receita_total_ciclo']:.2f}, Custos ciclo: {info_lucro['custos']:.2f}.")
+        logger.info(f"--- Fim do Ciclo {ciclo_num} ---")
+        return True
     except Exception as e:
-        logger.error(f"Erro ao salvar estado da simulação: {e}")
+        logger.error(f"Erro crítico durante o ciclo {ciclo_num}: {e}", exc_info=True)
+        registrar_evento(f"ERRO CRÍTICO no ciclo {ciclo_num}: {e}")
+        return False
+
+
+def run_simulation_entry_point(num_cycles: int, resume_flag: bool):
+    """
+    Ponto de entrada principal para executar a simulação.
+    Controla a inicialização, o loop de ciclos e o encerramento.
+    """
+    global MODO_VIDA_INFINITA, ciclo_atual_simulacao
+
+    # Definir nomes de arquivos padrão para salvar/carregar
+    save_file_agentes = "agentes_estado.json"
+    save_file_locais = "locais_estado.json"
+    save_file_ideias = "historico_ideias.json"
+    save_file_servicos = "servicos.json"
+    save_file_saldo = "saldo.json"
+    save_file_tarefas = "tarefas.json"
+    save_file_eventos = "eventos.json"
+
+    if resume_flag:
+        try:
+            logger.info("Tentando retomar simulação do estado salvo...")
+            carregar_dados(
+                save_file_agentes, save_file_locais, save_file_ideias,
+                save_file_servicos, save_file_saldo, save_file_tarefas, save_file_eventos
+            )
+            logger.info("Dados da simulação anterior carregados com sucesso.")
+            # Aqui, poderíamos carregar `ciclo_atual_simulacao` se o salvássemos.
+            # Por enquanto, se resume, os ciclos recomeçam a contagem do loop,
+            # mas o estado da empresa (saldo, tarefas, etc.) é contínuo.
+        except FileNotFoundError: # Genérico, pois carregar_dados lida com arquivos individuais
+            logger.warning("Um ou mais arquivos de save não foram encontrados. Iniciando nova simulação.")
+            inicializar_automaticamente()
+            ciclo_atual_simulacao = 0
+        except Exception as e:
+            logger.error(f"Erro ao carregar dados: {e}. Iniciando nova simulação.", exc_info=True)
+            inicializar_automaticamente()
+            ciclo_atual_simulacao = 0
+    else:
+        logger.info("Iniciando nova simulação.")
+        inicializar_automaticamente()
+        ciclo_atual_simulacao = 0
+
+    if num_cycles <= 0:
+        definir_modo_vida_infinita(True) # Isso também loga e registra evento
+        logger.info("Modo Vida Infinita ativado. Executando até Ctrl-C.")
+    else:
+        definir_modo_vida_infinita(False)
+        logger.info(f"Executando por {num_cycles} ciclos.")
+
+    try:
+        if MODO_VIDA_INFINITA:
+            # Se ciclo_atual_simulacao foi carregado, continuar dele. Senão, começar do 1.
+            loop_start_cycle = ciclo_atual_simulacao + 1 if ciclo_atual_simulacao > 0 and resume_flag else 1
+
+            current_loop_cycle = loop_start_cycle -1 # Ajuste para que o primeiro ciclo seja o 'loop_start_cycle'
+            while True:
+                current_loop_cycle +=1
+                if not executar_um_ciclo_completo(current_loop_cycle):
+                    logger.error(f"Encerrando simulação devido a erro crítico no ciclo {current_loop_cycle}.")
+                    break
+        else: # Finite cycles
+            start_cycle_num = ciclo_atual_simulacao + 1 if ciclo_atual_simulacao > 0 and resume_flag else 1
+            end_cycle_num = start_cycle_num + num_cycles -1
+
+            for i in range(start_cycle_num, end_cycle_num + 1):
+                if not executar_um_ciclo_completo(i):
+                    logger.error(f"Encerrando simulação devido a erro crítico no ciclo {i}.")
+                    break
+
+    except KeyboardInterrupt:
+        logger.info("\nCtrl-C detectado pelo usuário. Finalizando simulação...")
+        # O bloco finally cuidará do salvamento.
+    except Exception as e:
+        logger.critical(f"Erro não tratado no loop principal da simulação: {e}", exc_info=True)
+        # O bloco finally cuidará do salvamento.
+    finally:
+        logger.info("Salvando estado final da simulação...")
+        try:
+            # Aqui, poderíamos salvar `ciclo_atual_simulacao` também, talvez em saldo.json ou um meta_estado.json
+            salvar_dados(
+                save_file_agentes, save_file_locais, save_file_ideias,
+                save_file_servicos, save_file_saldo, save_file_tarefas, save_file_eventos
+            )
+            logger.info("Estado da simulação salvo com sucesso.")
+        except Exception as e_save:
+            logger.error(f"Erro crítico ao tentar salvar o estado final da simulação: {e_save}", exc_info=True)
+
+        logger.info(f"Simulação finalizada no ciclo {ciclo_atual_simulacao}.")
+        if MODO_VIDA_INFINITA:
+             logger.info("Modo Vida Infinita estava ATIVADO.")
+        sys.exit(0) # Garante que o programa saia após o finally, especialmente se houve exceção não pega antes.
