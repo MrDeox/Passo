@@ -4,42 +4,45 @@ from unittest.mock import patch, MagicMock, call # call para verificar chamadas 
 import pytest # pytest é usado para fixtures como reset_state, mas patch é do unittest.mock
 import requests.exceptions
 
-import empresa_digital as ed
-from empresa_digital import Agente, Local, OPENROUTER_CALL_DELAY_SECONDS # Importar classes e a constante de delay
+import empresa_digital # For functions
+import state # Added
+import config # Added
+from core_types import Agente, Local # Import Agente, Local from core_types
+# OPENROUTER_CALL_DELAY_SECONDS will be imported from config
 
 # Helper para criar um agente simples para testes
 def criar_agente_teste(nome="TestAgente", modelo="test-model"):
     # Certifique-se de que um local padrão exista ou crie um temporário se necessário
-    if "DefaultLocal" not in ed.locais:
-        ed.criar_local("DefaultLocal", "Local padrão para testes")
-    return ed.criar_agente(nome, "Tester", modelo, "DefaultLocal", "Test objective")
+    if "DefaultLocal" not in state.locais: # Use state
+        empresa_digital.criar_local("DefaultLocal", "Local padrão para testes") # Use empresa_digital
+    return empresa_digital.criar_agente(nome, "Tester", modelo, "DefaultLocal", "Test objective") # Use empresa_digital
 
 def test_auto_initialization_creates_resources(reset_state):
     """Verifica se a inicialização automática gera salas, agentes e tarefas."""
-    ed.inicializar_automaticamente()
-    assert ed.locais
-    assert ed.agentes
-    assert ed.tarefas_pendentes
+    empresa_digital.inicializar_automaticamente() # Use empresa_digital
+    assert state.locais # Use state
+    assert state.agentes # Use state
+    assert state.tarefas_pendentes # Use state
 
 
 def test_model_selection_does_not_fail():
     """Verifica se a selecao de modelo retorna um resultado e justificativa."""
-    modelo, rac = ed.selecionar_modelo("Dev")
+    modelo, rac = empresa_digital.selecionar_modelo("Dev") # Use empresa_digital
     assert modelo
     assert rac
 
 def test_model_selection_heuristics():
     """Garante que a escolha do modelo LLM segue a heurística esperada."""
-    assert ed.selecionar_modelo("Dev")[0] == "deepseek-chat"
-    assert ed.selecionar_modelo("CEO")[0] == "phi-4:free"
-    assert ed.selecionar_modelo("Outro")[0] == "gpt-3.5-turbo"
+    assert empresa_digital.selecionar_modelo("Dev")[0] == "deepseek-chat" # Use empresa_digital
+    assert empresa_digital.selecionar_modelo("CEO")[0] == "phi-4:free" # Use empresa_digital
+    assert empresa_digital.selecionar_modelo("Outro")[0] == "gpt-3.5-turbo" # Use empresa_digital
 
 
 # Testes para chamar_openrouter_api
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
 @patch('time.sleep', autospec=True) # Mock time.sleep
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0) # Set delay to 0 for this test
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config module
 def test_chamar_openrouter_api_success_first_attempt(mock_sleep, mock_post, mock_obter_key, reset_state):
     """Test successful API call on the first attempt without retries."""
     agente = criar_agente_teste()
@@ -56,7 +59,7 @@ def test_chamar_openrouter_api_success_first_attempt(mock_sleep, mock_post, mock
     mock_post.assert_called_once()
     # Assert that the initial delay sleep (which is 0 here due to patch) was called,
     # but no other sleeps for backoff occurred.
-    mock_sleep.assert_called_once_with(0) # OPENROUTER_CALL_DELAY_SECONDS is patched to 0
+    mock_sleep.assert_called_once_with(0) # config.OPENROUTER_CALL_DELAY_SECONDS is patched to 0
     assert result == '{"acao": "ficar"}'
     mock_obter_key.assert_called_once()
 
@@ -66,7 +69,7 @@ def test_chamar_openrouter_api_no_key(mock_post, mock_obter_key, reset_state): #
     agente = criar_agente_teste()
     prompt = "Test prompt"
 
-    result = ed.chamar_openrouter_api(agente, prompt)
+    result = empresa_digital.chamar_openrouter_api(agente, prompt) # Use empresa_digital
 
     expected_error = {"error": "API key not found", "details": "OpenRouter API key is missing or not configured."}
     assert json.loads(result) == expected_error
@@ -76,7 +79,7 @@ def test_chamar_openrouter_api_no_key(mock_post, mock_obter_key, reset_state): #
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
 @patch('time.sleep', autospec=True)
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0) # Disable fixed delay for this test
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config
 def test_chamar_openrouter_api_timeout_with_retry_success(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
     """Test that a Timeout exception triggers a retry and can succeed."""
     agente = criar_agente_teste()
@@ -110,7 +113,7 @@ def test_chamar_openrouter_api_timeout_with_retry_success(mock_time_sleep, mock_
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
 @patch('time.sleep', autospec=True)
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config
 def test_chamar_openrouter_api_retry_on_specific_codes_then_success(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
     """Test retry on specified error codes (429) and eventual success."""
     agente = criar_agente_teste()
@@ -139,7 +142,7 @@ def test_chamar_openrouter_api_retry_on_specific_codes_then_success(mock_time_sl
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
 @patch('time.sleep', autospec=True)
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config
 def test_chamar_openrouter_api_exhaust_retries(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
     """Test that API call fails after exhausting all retries on a retryable error."""
     agente = criar_agente_teste()
@@ -171,7 +174,7 @@ def test_chamar_openrouter_api_exhaust_retries(mock_time_sleep, mock_requests_po
 @patch('empresa_digital.obter_api_key', return_value="fake_api_key")
 @patch('requests.post')
 @patch('time.sleep', autospec=True)
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config
 def test_chamar_openrouter_api_no_retry_on_non_retryable_code(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
     """Test that non-retryable error codes (e.g., 400) are not retried."""
     agente = criar_agente_teste()
@@ -214,7 +217,7 @@ def test_chamar_openrouter_api_fixed_call_delay_applied(mock_time_sleep, mock_re
         successful_response.text = json.dumps(successful_response.json.return_value)
         mock_requests_post.return_value = successful_response
 
-        result = ed.chamar_openrouter_api(agente, prompt)
+    result = empresa_digital.chamar_openrouter_api(agente, prompt) # Use empresa_digital
 
         mock_requests_post.assert_called_once()
         # The first call to sleep should be the fixed delay
@@ -229,7 +232,7 @@ def test_chamar_openrouter_api_invalid_json_response(mock_requests_post, mock_ob
     # This test is largely the same, but ensure it doesn't conflict with retry logic for sleep calls
     # by also patching OPENROUTER_CALL_DELAY_SECONDS to 0 and time.sleep.
     with patch('time.sleep', autospec=True) as mock_time_sleep, \
-         patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0):
+         patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0): # Patch in config
         agente = criar_agente_teste()
         prompt = "Test prompt"
 
@@ -239,7 +242,7 @@ def test_chamar_openrouter_api_invalid_json_response(mock_requests_post, mock_ob
         mock_response.json.side_effect = json.JSONDecodeError("Error", "doc", 0)
         mock_requests_post.return_value = mock_response
 
-        result = ed.chamar_openrouter_api(agente, prompt)
+        result = empresa_digital.chamar_openrouter_api(agente, prompt) # Use empresa_digital
 
         expected_error = {"error": "API call failed", "details": "Invalid JSON response from API."}
         assert json.loads(result) == expected_error
@@ -250,7 +253,7 @@ def test_chamar_openrouter_api_invalid_json_response(mock_requests_post, mock_ob
 def test_chamar_openrouter_api_unexpected_structure(mock_requests_post, mock_obter_key, reset_state):
     # Similar to above, ensure this test is also robust to sleep calls by patching them.
     with patch('time.sleep', autospec=True) as mock_time_sleep, \
-         patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0):
+         patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0): # Patch in config
         agente = criar_agente_teste()
         prompt = "Test prompt"
 
@@ -262,7 +265,7 @@ def test_chamar_openrouter_api_unexpected_structure(mock_requests_post, mock_obt
         mock_response.text = json.dumps(unexpected_payload)
         mock_requests_post.return_value = mock_response
 
-        result = ed.chamar_openrouter_api(agente, prompt)
+        result = empresa_digital.chamar_openrouter_api(agente, prompt) # Use empresa_digital
 
         loaded_result = json.loads(result)
         assert loaded_result["error"] == "Invalid response structure"
@@ -273,7 +276,7 @@ def test_chamar_openrouter_api_unexpected_structure(mock_requests_post, mock_obt
 @patch('requests.post')
 # Patched time.sleep and OPENROUTER_CALL_DELAY_SECONDS as this is a non-retryable error test
 @patch('time.sleep', autospec=True)
-@patch('empresa_digital.OPENROUTER_CALL_DELAY_SECONDS', 0)
+@patch('config.OPENROUTER_CALL_DELAY_SECONDS', 0) # Patch in config
 def test_chamar_openrouter_api_http_error_non_retryable_401(mock_time_sleep, mock_requests_post, mock_obter_key, reset_state):
     """ Test a specific non-retryable HTTP error like 401. """
     agente = criar_agente_teste()
@@ -285,7 +288,7 @@ def test_chamar_openrouter_api_http_error_non_retryable_401(mock_time_sleep, moc
     mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("Unauthorized key")
     mock_requests_post.return_value = mock_response
 
-    result = ed.chamar_openrouter_api(agente, prompt)
+    result = empresa_digital.chamar_openrouter_api(agente, prompt) # Use empresa_digital
 
     # Deve tentar 3 vezes
     assert mock_requests_post.call_count == 3
@@ -303,7 +306,7 @@ def test_enviar_para_llm_calls_chamar_openrouter_api(mock_chamar_api, reset_stat
     prompt = "Test prompt for enviar_para_llm"
     mock_chamar_api.return_value = '{"acao": "ficar"}' # Simula uma resposta bem sucedida
 
-    response = ed.enviar_para_llm(agente, prompt)
+    response = empresa_digital.enviar_para_llm(agente, prompt) # Use empresa_digital
 
     mock_chamar_api.assert_called_once_with(agente, prompt)
     assert response == '{"acao": "ficar"}'
@@ -333,14 +336,14 @@ def test_enviar_para_llm_calls_chamar_openrouter_api(mock_chamar_api, reset_stat
 ])
 def test_executar_resposta_scenarios(reset_state, resposta_llm, expected_action_details, fallback_involved):
     # Criar locais e agentes necessários para os testes
-    ed.criar_local("SalaNova", "Sala de teste para mover")
+    empresa_digital.criar_local("SalaNova", "Sala de teste para mover") # Use empresa_digital
     agente_principal = criar_agente_teste(nome="Principal")
-    ed.criar_agente("Bob", "colega", "test-model", "DefaultLocal")
+    empresa_digital.criar_agente("Bob", "colega", "test-model", "DefaultLocal") # Use empresa_digital
 
     # Limpar histórico de ações para isolar o teste
     agente_principal.historico_acoes.clear()
 
-    ed.executar_resposta(agente_principal, resposta_llm)
+    empresa_digital.executar_resposta(agente_principal, resposta_llm) # Use empresa_digital
 
     assert len(agente_principal.historico_acoes) > 0, f"Nenhuma ação registrada para resposta: {resposta_llm}"
     last_action = agente_principal.historico_acoes[-1]

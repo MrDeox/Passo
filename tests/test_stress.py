@@ -1,18 +1,19 @@
 """Testes de stress simulando grande volume de tarefas."""
 
-import empresa_digital as ed
+import empresa_digital # For functions
+import state # Added
 import rh
 
 
 def test_crescimento_rapido_cria_muitos_agentes():
-    ed.criar_local("Lab", "", [])
+    empresa_digital.criar_local("Lab", "", [])
     for i in range(50):
-        ed.adicionar_tarefa(f"Tarefa {i}")
-    ed.saldo = 100
-    rh.saldo = ed.saldo
-    rh.modulo_rh.verificar()
+        empresa_digital.adicionar_tarefa(f"Tarefa {i}")
+    state.saldo = 100
+    # rh.saldo = state.saldo # rh.py should use state.saldo directly
+    rh.modulo_rh.verificar() # rh.py uses state
     # Um agente extra eh criado inicialmente para preencher a sala vazia
-    assert len(ed.agentes) == 51
-    assert not ed.tarefas_pendentes
+    assert len(state.agentes) == 51
+    assert not state.tarefas_pendentes # tarefas_pendentes should be empty if all processed
 
 

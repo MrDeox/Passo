@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 import api
-import empresa_digital as ed
-import ciclo_criativo
+# import empresa_digital as ed # Not directly used
+# import ciclo_criativo # Not directly used
 import pytest
 
 

@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 import api
-import empresa_digital as ed
+import state # Added
+# import empresa_digital as ed # No longer needed for direct variable access
 
 
 def test_startup_creates_company(reset_state):
@@ -10,7 +11,7 @@ def test_startup_creates_company(reset_state):
         locais = client.get("/locais").json()
         assert len(agentes) >= 3
         assert len(locais) >= 2
-        assert ed.historico_saldo  # saldo calculado no startup
+        assert state.historico_saldo  # saldo calculado no startup, check state
 
 
 def test_multiple_cycles_autonomous(reset_state):
@@ -21,6 +22,6 @@ def test_multiple_cycles_autonomous(reset_state):
             resp = client.post("/ciclo/next")
             assert resp.status_code == 200
             saldos.append(resp.json()["saldo"])
-        assert len(ed.historico_saldo) >= 3
-        assert ed.historico_saldo[-1] >= saldos[0]
+        assert len(state.historico_saldo) >= 3 # Check state
+        assert state.historico_saldo[-1] >= saldos[0] # Check state
         assert any(i for i in resp.json()["ideias"])

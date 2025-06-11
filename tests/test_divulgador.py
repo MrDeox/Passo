@@ -21,7 +21,7 @@ def sample_ideia_for_divulgador():
 def mock_divulgador_dependencies():
     with patch('divulgador.selecionar_modelo') as mock_select_model, \
          patch('divulgador.chamar_openrouter_api') as mock_call_llm, \
-         patch('divulgador.registrar_evento') as mock_register_event:
+         patch('divulgador.state.registrar_evento') as mock_register_event: # Patched state.registrar_evento
 
         yield {
             "select_model": mock_select_model,

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 import api
-import empresa_digital as ed
+# import empresa_digital as ed # ed is not used directly in this file
 
 
 def test_event_endpoint_updates(reset_state):

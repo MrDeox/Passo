@@ -2,9 +2,11 @@ import logging
 import os
 # import json # May not be needed if LLM response is treated as raw string
 
-# Relative imports - assuming this file is in the same directory as empresa_digital.py, etc.
-from .empresa_digital import Ideia, registrar_evento, Agente # Agente for temp LLM call
-from .openrouter_utils import selecionar_modelo, chamar_openrouter_api
+import state # Added
+from core_types import Ideia, Agente # Changed from empresa_digital
+# registrar_evento will be imported from state or use state.registrar_evento
+from openrouter_utils import selecionar_modelo, chamar_openrouter_api
+# from state import registrar_evento # Option 1 for registrar_evento
 
 # Module-level logger
 logger = logging.getLogger(__name__)
@@ -127,9 +129,9 @@ Gere as sugestões de conteúdo de marketing agora.
         return None
 
     # 4. Logging Suggestions (registrar_evento from empresa_digital)
-    # Assuming registrar_evento is available globally via `from .empresa_digital import registrar_evento`
+    # Assuming registrar_evento is available globally via `from state import registrar_evento` or use `state.registrar_evento`
     try:
-        registrar_evento(f"Geradas sugestões de marketing para o produto: {ideia.descricao}. Link: {produto_link}")
+        state.registrar_evento(f"Geradas sugestões de marketing para o produto: {ideia.descricao}. Link: {produto_link}")
         # Log the actual suggestions for more detail if needed, but might be too verbose for general event log
         # For detailed logging, use the module's logger:
         logger.info(f"Sugestões de marketing para '{ideia.descricao}':\n{resposta_llm_marketing}")
@@ -158,7 +160,8 @@ if __name__ == '__main__':
     # Store original functions to restore them later
     original_selecionar_modelo = selecionar_modelo
     original_chamar_openrouter_api = chamar_openrouter_api
-    original_registrar_evento = registrar_evento
+    # original_registrar_evento = registrar_evento # registrar_evento is now state.registrar_evento
+    # Mocking state.registrar_evento in __main__ is more complex.
 
     def mock_selecionar_modelo_div(agent_type, objective):
         logger.info(f"Selecionando modelo (mock) para Divulgador: {agent_type} com objetivo '{objective}'")
@@ -213,7 +216,9 @@ if __name__ == '__main__':
     # Apply mocks
     selecionar_modelo = mock_selecionar_modelo_div
     chamar_openrouter_api = mock_chamar_openrouter_api_div
-    registrar_evento = mock_registrar_evento_div
+    # Mocking state.registrar_evento for __main__ block:
+    original_state_registrar_evento = state.registrar_evento
+    state.registrar_evento = mock_registrar_evento_div
 
     # --- Test Case ---
     ideia_teste_div = MockIdeiaForDivulgador(
@@ -262,7 +267,7 @@ if __name__ == '__main__':
     # Restore original functions
     selecionar_modelo = original_selecionar_modelo
     chamar_openrouter_api = original_chamar_openrouter_api
-    registrar_evento = original_registrar_evento
+    state.registrar_evento = original_state_registrar_evento # Restore
 
     logger.info("\nTestes do módulo divulgador.py concluídos.")
 

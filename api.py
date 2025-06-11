@@ -37,33 +37,18 @@ def obter_api_key() -> str:
         return key
     raise RuntimeError("OPENROUTER_API_KEY nao definido")
 
+import state # Added
+import empresa_digital # Added
+from core_types import Agente, Local # Added
+# empresa_digital functions will be used via empresa_digital.func_name
+# state variables will be used via state.var_name
 
-from empresa_digital import (
-    Agente,
-    Local,
-    agentes,
-    locais,
-    saldo,
-    historico_saldo,
-    calcular_lucro_ciclo,
-    criar_agente,
-    criar_local,
-    mover_agente,
-    gerar_prompt_decisao,
-    enviar_para_llm,
-    executar_resposta,
-    inicializar_automaticamente,
-    carregar_dados,
-    salvar_dados,
-    historico_eventos,
-    registrar_evento,
-)
 from openrouter_utils import (
     buscar_modelos_gratis,
     escolher_modelo_llm,
 )
 from rh import modulo_rh
-from ciclo_criativo import executar_ciclo_criativo, historico_ideias, historico_servicos # Import historico_servicos
+from ciclo_criativo import executar_ciclo_criativo # historico_ideias, historico_servicos are now in state
 from dataclasses import asdict # To convert Service dataclass to dict
 
 # Configuração de logging global
@@ -85,25 +70,25 @@ def _startup() -> None:
         and DATA_LOCAIS.exists()
     ):
         try:
-            carregar_dados(str(DATA_AGENTES), str(DATA_LOCAIS))
+            empresa_digital.carregar_dados(str(DATA_AGENTES), str(DATA_LOCAIS)) # Use empresa_digital.
             logging.info(
                 "Dados carregados de %s e %s", DATA_AGENTES, DATA_LOCAIS
             )
         except Exception as exc:
             logging.error("Falha ao carregar dados: %s", exc)
-            inicializar_automaticamente()
+            empresa_digital.inicializar_automaticamente() # Use empresa_digital.
     else:
-        inicializar_automaticamente()
+        empresa_digital.inicializar_automaticamente() # Use empresa_digital.
     # Dispara automaticamente o primeiro ciclo de simulacao
-    historico_eventos.clear()
-    registrar_evento("Inicio automatico da empresa")
+    state.historico_eventos.clear() # Use state.
+    state.registrar_evento("Inicio automatico da empresa") # Use state.
     modulo_rh.verificar()
     executar_ciclo_criativo()
-    for ag in list(agentes.values()):
-        prompt = gerar_prompt_decisao(ag)
-        resp = enviar_para_llm(ag, prompt)
-        executar_resposta(ag, resp)
-    calcular_lucro_ciclo()
+    for ag in list(state.agentes.values()): # Use state.
+        prompt = empresa_digital.gerar_prompt_decisao(ag) # Use empresa_digital.
+        resp = empresa_digital.enviar_para_llm(ag, prompt) # Use empresa_digital.
+        empresa_digital.executar_resposta(ag, resp) # Use empresa_digital.
+    empresa_digital.calcular_lucro_ciclo() # Use empresa_digital.
 
 
 @app.on_event("shutdown")
@@ -112,7 +97,7 @@ def _shutdown() -> None:
     if "PYTEST_CURRENT_TEST" in os.environ:
         return
     try:
-        salvar_dados(str(DATA_AGENTES), str(DATA_LOCAIS))
+        empresa_digital.salvar_dados(str(DATA_AGENTES), str(DATA_LOCAIS)) # Use empresa_digital.
         logging.info(
             "Dados salvos em %s e %s", DATA_AGENTES, DATA_LOCAIS
         )
@@ -219,13 +204,13 @@ def escolher_modelo_endpoint(dados: EscolherModeloIn):
 @app.get("/agentes")
 async def listar_agentes():
     """Retorna todos os agentes e suas informações."""
-    return [agente_to_dict(a) for a in agentes.values()]
+    return [agente_to_dict(a) for a in state.agentes.values()] # Use state.
 
 
 @app.get("/agentes/{nome}")
 async def obter_agente(nome: str):
     """Recupera um único agente pelo nome."""
-    ag = agentes.get(nome)
+    ag = state.agentes.get(nome) # Use state.
     if ag is None:
         raise HTTPException(status_code=404, detail="Agente nao encontrado")
     return agente_to_dict(ag)
@@ -234,22 +219,22 @@ async def obter_agente(nome: str):
 @app.post("/agentes", status_code=201)
 async def criar_agente_endpoint(dados: AgentIn):
     """Cria um novo agente."""
-    if dados.nome in agentes:
+    if dados.nome in state.agentes: # Use state.
         raise HTTPException(status_code=400, detail="Agente ja existe")
-    criar_agente(
+    empresa_digital.criar_agente( # Use empresa_digital.
         dados.nome,
         dados.funcao,
         dados.modelo_llm,
         dados.local,
         dados.objetivo,
     )
-    return agente_to_dict(agentes[dados.nome])
+    return agente_to_dict(state.agentes[dados.nome]) # Use state.
 
 
 @app.put("/agentes/{nome}")
 async def editar_agente(nome: str, dados: AgentUpdate):
     """Edita atributos de um agente existente."""
-    ag = agentes.get(nome)
+    ag = state.agentes.get(nome) # Use state.
     if ag is None:
         raise HTTPException(status_code=404, detail="Agente nao encontrado")
     if dados.funcao is not None:
@@ -261,14 +246,14 @@ async def editar_agente(nome: str, dados: AgentUpdate):
     if dados.feedback_ceo is not None:
         ag.feedback_ceo = dados.feedback_ceo
     if dados.local is not None:
-        mover_agente(nome, dados.local)
+        empresa_digital.mover_agente(nome, dados.local) # Use empresa_digital.
     return agente_to_dict(ag)
 
 
 @app.delete("/agentes/{nome}")
 async def remover_agente(nome: str):
     """Remove um agente do sistema."""
-    ag = agentes.pop(nome, None)
+    ag = state.agentes.pop(nome, None) # Use state.
     if ag is None:
         raise HTTPException(status_code=404, detail="Agente nao encontrado")
     if ag.local_atual:
@@ -280,13 +265,13 @@ async def remover_agente(nome: str):
 @app.get("/locais")
 async def listar_locais():
     """Lista todos os locais e quem está em cada um."""
-    return [local_to_dict(l) for l in locais.values()]
+    return [local_to_dict(l) for l in state.locais.values()] # Use state.
 
 
 @app.get("/locais/{nome}")
 async def obter_local(nome: str):
     """Recupera um local específico."""
-    loc = locais.get(nome)
+    loc = state.locais.get(nome) # Use state.
     if loc is None:
         raise HTTPException(status_code=404, detail="Local nao encontrado")
     return local_to_dict(loc)
@@ -295,16 +280,16 @@ async def obter_local(nome: str):
 @app.post("/locais", status_code=201)
 async def criar_local_endpoint(dados: LocalIn):
     """Cria um novo local."""
-    if dados.nome in locais:
+    if dados.nome in state.locais: # Use state.
         raise HTTPException(status_code=400, detail="Local ja existe")
-    criar_local(dados.nome, dados.descricao, dados.inventario)
-    return local_to_dict(locais[dados.nome])
+    empresa_digital.criar_local(dados.nome, dados.descricao, dados.inventario) # Use empresa_digital.
+    return local_to_dict(state.locais[dados.nome]) # Use state.
 
 
 @app.put("/locais/{nome}")
 async def editar_local(nome: str, dados: LocalUpdate):
     """Edita um local existente."""
-    loc = locais.get(nome)
+    loc = state.locais.get(nome) # Use state.
     if loc is None:
         raise HTTPException(status_code=404, detail="Local nao encontrado")
     if dados.descricao is not None:
@@ -317,7 +302,7 @@ async def editar_local(nome: str, dados: LocalUpdate):
 @app.delete("/locais/{nome}")
 async def remover_local(nome: str):
     """Remove um local do sistema."""
-    loc = locais.pop(nome, None)
+    loc = state.locais.pop(nome, None) # Use state.
     if loc is None:
         raise HTTPException(status_code=404, detail="Local nao encontrado")
     # Desassocia agentes que estavam presentes
@@ -331,7 +316,7 @@ async def remover_local(nome: str):
 @app.get("/eventos")
 async def listar_eventos():
     """Retorna a lista de eventos registrados no último ciclo."""
-    return list(historico_eventos)
+    return list(state.historico_eventos) # Use state.
 
 
 @app.get("/lucro")
@@ -341,21 +326,21 @@ async def obter_lucro():
     # mas para este endpoint, manter a resposta simples pode ser ok,
     # ou podemos expandi-la se necessário.
     # Por ora, mantendo simples. O saldo é o mais importante aqui.
-    return {"saldo": saldo, "historico_saldo": historico_saldo}
+    return {"saldo": state.saldo, "historico_saldo": state.historico_saldo} # Use state.
 
 
 # ------------------------------ Endpoints Serviços -----------------------------
 @app.get("/servicos")
 async def listar_servicos():
     """Lista todos os serviços propostos e seu estado atual."""
-    # historico_servicos é importado de ciclo_criativo
+    # historico_servicos is now in state
     # asdict é importado de dataclasses
-    return [asdict(s) for s in historico_servicos]
+    return [asdict(s) for s in state.historico_servicos] # Use state.
 
 @app.get("/servicos/{service_id}")
 async def obter_servico(service_id: str):
     """Recupera um serviço específico pelo seu ID."""
-    servico_encontrado = next((s for s in historico_servicos if s.id == service_id), None)
+    servico_encontrado = next((s for s in state.historico_servicos if s.id == service_id), None) # Use state.
     if not servico_encontrado:
         raise HTTPException(status_code=404, detail=f"Serviço com ID '{service_id}' não encontrado.")
     return asdict(servico_encontrado)
@@ -369,19 +354,19 @@ async def proximo_ciclo():
     # Ciclo criativo automatico de ideacao e validacao
     executar_ciclo_criativo()
     resultados = []
-    historico_eventos.clear()
-    for ag in agentes.values():
-        prompt = gerar_prompt_decisao(ag)
-        resp = enviar_para_llm(ag, prompt)
-        executar_resposta(ag, resp)
+    state.historico_eventos.clear() # Use state.
+    for ag in state.agentes.values(): # Use state.
+        prompt = empresa_digital.gerar_prompt_decisao(ag) # Use empresa_digital.
+        resp = empresa_digital.enviar_para_llm(ag, prompt) # Use empresa_digital.
+        empresa_digital.executar_resposta(ag, resp) # Use empresa_digital.
         resultados.append(agente_to_dict(ag))
-    lucro_info = calcular_lucro_ciclo()
+    lucro_info = empresa_digital.calcular_lucro_ciclo() # Use empresa_digital.
     return {
         "agentes": resultados,
-        "saldo": lucro_info["saldo"],
-        "historico_saldo": historico_saldo,
-        "eventos": list(historico_eventos),
-        "ideias": [asdict(i) for i in historico_ideias], # Usar asdict para consistência
-        "servicos": [asdict(s) for s in historico_servicos],
+        "saldo": lucro_info["saldo"], # This saldo is from the return value of calcular_lucro_ciclo
+        "historico_saldo": state.historico_saldo, # Use state.
+        "eventos": list(state.historico_eventos), # Use state.
+        "ideias": [asdict(i) for i in state.historico_ideias], # Usar asdict para consistência # Use state.
+        "servicos": [asdict(s) for s in state.historico_servicos], # Use state.
     }
 
