@@ -4,9 +4,10 @@ from unittest.mock import patch, mock_open, MagicMock
 
 # Assuming criador_de_produtos.py and other modules are in the parent directory
 # or accessible via PYTHONPATH
-from criador_de_produtos import produto_digital, PRODUTOS_GERADOS_DIR
+from criador_de_produtos import produto_digital # PRODUTOS_GERADOS_DIR is now in config
+import config # Added
 from core_types import Ideia # Import Ideia from core_types
-# from empresa_digital import Agente # Agente is used internally by criador_de_produtos
+# from empresa_digital import Agente # Agente is now from core_types, used by criador_de_produtos
 
 # Mock Agente if its instantiation is complex or has side effects not needed for these tests.
 # However, criador_de_produtos.py currently instantiates a simple Agente.
@@ -27,7 +28,7 @@ def mock_dependencies():
          patch('criador_de_produtos.chamar_openrouter_api') as mock_call_llm, \
          patch('criador_de_produtos.get_gumroad_api_key') as mock_get_gumroad_key, \
          patch('criador_de_produtos.create_product') as mock_create_gumroad_product, \
-         patch('criador_de_produtos.registrar_evento') as mock_register_event, \
+         patch('criador_de_produtos.state.registrar_evento') as mock_register_event, \
          patch('os.makedirs') as mock_makedirs, \
          patch('builtins.open', new_callable=mock_open) as mock_file_open:
 
@@ -55,16 +56,16 @@ class TestProdutoDigitalSuccess:
         result_url = produto_digital(sample_ideia, mock_empresa_agentes, mock_todos_locais)
 
         assert result_url == "https://gum.co/mockebook"
-        mock_dependencies["makedirs"].assert_called_once_with(PRODUTOS_GERADOS_DIR, exist_ok=True)
+        mock_dependencies["makedirs"].assert_called_once_with(config.PRODUTOS_GERADOS_DIR, exist_ok=True)
 
         # Filename generation logic from criador_de_produtos.py:
         # sanitized_description = re.sub(r'[^\w\s-]', '', ideia.descricao.lower())
         # sanitized_description = re.sub(r'[-\s]+', '_', sanitized_description).strip('_')
         # filename_base = sanitized_description[:50] if sanitized_description else "produto_sem_titulo"
         # product_filename = f"{filename_base}.md"
-        # product_filepath = os.path.join(PRODUTOS_GERADOS_DIR, product_filename)
+        # product_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, product_filename)
         expected_filename_base = "super_ebook_de_testes" # After sanitization
-        expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+        expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
 
         mock_dependencies["file_open"].assert_called_once_with(expected_filepath, "w", encoding="utf-8")
         mock_dependencies["file_open"]().write.assert_called_once_with("# Conteúdo do Ebook\n\nMuito bom.")
@@ -120,7 +121,7 @@ class TestProdutoDigitalFailures:
             )
             # Check if os.remove was called on the generated .md file
             expected_filename_base = "super_ebook_de_testes"
-            expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+            expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
             mock_os_remove.assert_called_once_with(expected_filepath)
 
 
@@ -134,12 +135,18 @@ class TestProdutoDigitalFailures:
         result = produto_digital(sample_ideia, {}, {})
 
         assert result is None
+        # Event for "Falha ao obter chave Gumroad" is called first if key is missing,
+        # then if key is present but create_product returns None, "Falha ao publicar" is called.
+        # This test mocks get_gumroad_key to return a dummy key, so only "Falha ao publicar" should be checked.
+        # However, the current code in criador_de_produtos.py for this specific scenario (create_product returns None)
+        # calls state.registrar_evento(f"Falha ao publicar '{ideia.descricao}' na Gumroad (retorno None).", todos_locais)
+        # So the assertion needs to match this.
         mock_dependencies["register_event"].assert_any_call(
-             f"Falha ao publicar '{sample_ideia.descricao}' na Gumroad (retorno None).", {}
+             f"Falha ao publicar '{sample_ideia.descricao}' na Gumroad (retorno None).", {} # Assuming todos_locais is {} in test
         )
 
         expected_filename_base = "super_ebook_de_testes"
-        expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+        expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
         mock_os_remove.assert_called_once_with(expected_filepath)
 
     @patch("os.remove") # To check cleanup if it occurs
@@ -181,14 +188,16 @@ class TestProdutoDigitalFailures:
         # The exact string might be tricky due to exception formatting, so check for a substring or use any_call
         # For more precise matching, you might need to capture the call_args
         event_found = False
-        for call_args in mock_dependencies["register_event"].call_args_list:
-            if f"Exceção ao publicar '{sample_ideia.descricao}' na Gumroad: Exception('Gumroad API exploded')" in call_args[0][0]:
+        # Call args for MagicMock are tuples (args, kwargs)
+        for call_obj in mock_dependencies["register_event"].call_args_list:
+            args, _ = call_obj
+            if args and f"Exceção ao publicar '{sample_ideia.descricao}' na Gumroad: Exception('Gumroad API exploded')" in args[0]:
                 event_found = True
                 break
         assert event_found, "Event for Gumroad API exception not found or message mismatch"
 
         expected_filename_base = "super_ebook_de_testes"
-        expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+        expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
         mock_os_remove.assert_called_once_with(expected_filepath)
 
     def test_empty_ideia_descricao_filename(self, sample_ideia, mock_dependencies):
@@ -201,7 +210,7 @@ class TestProdutoDigitalFailures:
         produto_digital(sample_ideia, {}, {})
 
         expected_filename_base = "produto_sem_titulo" # Default for empty/unusable description
-        expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+        expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
         mock_dependencies["file_open"].assert_called_once_with(expected_filepath, "w", encoding="utf-8")
 
     def test_filename_sanitization(self, sample_ideia, mock_dependencies):
@@ -217,7 +226,7 @@ class TestProdutoDigitalFailures:
         # re.sub(r'[^\w\s-]', '', "produto com /\\:*?\"<>| caracteres especiais!".lower()) -> "produto com  caracteres especiais"
         # re.sub(r'[-\s]+', '_', "produto com  caracteres especiais").strip('_') -> "produto_com_caracteres_especiais"
         expected_filename_base = "produto_com_caracteres_especiais"
-        expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+        expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
         mock_dependencies["file_open"].assert_called_once_with(expected_filepath, "w", encoding="utf-8")
 
 # Note: To run these tests, ensure pytest is installed and modules are importable.
@@ -261,9 +270,9 @@ class TestProdutoDigitalOfflineSimulation:
             mock_dependencies["call_llm"].assert_called_once()
 
             # Verify file saving operations still occurred
-            mock_dependencies["makedirs"].assert_called_once_with(PRODUTOS_GERADOS_DIR, exist_ok=True)
+            mock_dependencies["makedirs"].assert_called_once_with(config.PRODUTOS_GERADOS_DIR, exist_ok=True)
             expected_filename_base = "super_ebook_de_testes" # Based on sample_ideia.descricao
-            expected_filepath = os.path.join(PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
+            expected_filepath = os.path.join(config.PRODUTOS_GERADOS_DIR, f"{expected_filename_base}.md")
             mock_dependencies["file_open"].assert_called_once_with(expected_filepath, "w", encoding="utf-8")
             mock_dependencies["file_open"]().write.assert_called_once_with("# Conteúdo Offline Simulado\n\nEste é um teste.")
 
@@ -275,8 +284,9 @@ class TestProdutoDigitalOfflineSimulation:
 
             # Verify event logging for simulation mode
             event_found = False
-            for call_args_list in mock_dependencies["register_event"].call_args_list:
-                event_message = call_args_list[0][0] # Get the first positional argument of the call
+        for call_obj in mock_dependencies["register_event"].call_args_list:
+            args, _ = call_obj
+            event_message = args[0] # Get the first positional argument of the call
                 if f"Produto simulado '{sample_ideia.descricao}' criado localmente: {expected_simulated_url}" in event_message:
                     event_found = True
                     break

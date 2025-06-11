@@ -159,3 +159,74 @@ class Task:
         # import empresa_digital as ed # Would create circular import if done at top level
         # ed.registrar_evento(f"Task '{self.description[:30]}...' (ID: {self.id}) status updated to {new_status}. Message: {message}")
         # For now, history on the object is primary. Global logging can be done by the caller.
+
+# Moved from empresa_digital.py
+@dataclass
+class Local:
+    """Representa um local na empresa.
+
+    Attributes:
+        nome: Nome do local (chave no dicionário global).
+        descricao: Breve descrição do local.
+        inventario: Lista de recursos ou ferramentas disponíveis.
+        agentes_presentes: Lista de agentes atualmente neste local.
+    """
+
+    nome: str
+    descricao: str
+    inventario: List[str] = field(default_factory=list)
+    agentes_presentes: List["Agente"] = field(default_factory=list)
+
+    def adicionar_agente(self, agente: "Agente") -> None:
+        """Adiciona um agente à lista de presentes."""
+        if agente not in self.agentes_presentes:
+            self.agentes_presentes.append(agente)
+
+    def remover_agente(self, agente: "Agente") -> None:
+        """Remove um agente da lista de presentes se estiver nela."""
+        if agente in self.agentes_presentes:
+            self.agentes_presentes.remove(agente)
+
+
+@dataclass
+class Agente:
+    """Representa um agente (funcionário ou bot) na empresa digital.
+
+    As decisões do agente são conduzidas por um Modelo de Linguagem (LLM)
+    especificado em `modelo_llm`, que é usado para chamadas via OpenRouter.
+    """
+
+    nome: str
+    funcao: str
+    modelo_llm: str  # Modelo de LLM da OpenRouter (ex: "anthropic/claude-3-haiku", "openai/gpt-4-turbo")
+    local_atual: Optional[Local] = None
+    historico_acoes: List[str] = field(default_factory=list)
+    historico_interacoes: List[str] = field(default_factory=list)
+    historico_locais: List[str] = field(default_factory=list)
+    objetivo_atual: str = ""
+    feedback_ceo: str = ""
+    estado_emocional: int = 0
+    actions_successful_for_objective: int = 0 # New field for tracking task progress
+    cycles_idle: int = 0 # New field for tracking Executor idle cycles
+
+    def mover_para(self, novo_local: Local) -> None:
+        """Move o agente para um novo local, atualizando todas as referências."""
+        if self.local_atual is not None:
+            self.local_atual.remover_agente(self)
+        novo_local.adicionar_agente(self)
+        self.local_atual = novo_local
+        # Registra o local visitado mantendo apenas os dois últimos
+        self.historico_locais.append(novo_local.nome)
+        if len(self.historico_locais) > 2:
+            self.historico_locais = self.historico_locais[-2:]
+
+    def registrar_acao(self, descricao: str, sucesso: bool) -> None:
+        """Registra uma ação executada e ajusta o estado emocional."""
+        self.historico_acoes.append(descricao)
+        if len(self.historico_acoes) > 3:
+            self.historico_acoes = self.historico_acoes[-3:]
+
+        # Ajusta o estado emocional em função do resultado da ação.
+        self.estado_emocional += 1 if sucesso else -1
+        # Limita o valor entre -5 e 5 para evitar exageros.
+        self.estado_emocional = max(-5, min(5, self.estado_emocional))

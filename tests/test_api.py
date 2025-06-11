@@ -4,7 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api # Importa o módulo api para testar obter_api_key
-import empresa_digital as ed
+# import empresa_digital as ed # ed might not be needed directly if only state is used for assertions
+import state # Added
 
 client = TestClient(api.app)
 
@@ -114,6 +115,6 @@ def test_ciclo_next(reset_state):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["agentes"]) == 2
-    assert data["saldo"] == 10.0
-    assert ed.historico_saldo[-1] == 10.0
+    assert data["saldo"] == 10.0 # This saldo is from the API response
+    assert state.historico_saldo[-1] == 10.0 # Check the actual state
     assert data["ideias"]
