@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 @dataclass
 class CompanySettings:
@@ -11,5 +11,6 @@ class CompanySettings:
     max_simulation_cycles: int = 100 # 0 para infinito
     llm_provider: str = "default_provider" # Ex: 'openai', 'openrouter', 'google_vertex'
     default_llm_model: str = "default_model"
+    openai_api_key: Optional[str] = None
     # Outras configurações relevantes podem ser adicionadas aqui
     # Ex: custos operacionais, taxas de juros, etc.
