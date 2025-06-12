@@ -11,7 +11,7 @@ from src.utils.llm_integration import LLMIntegration
 # from src.services.service_manager import ServiceManager
 # from src.finance.financial_manager import FinancialManager, TransactionType # Import TransactionType if used
 # from src.marketing.campaign_manager import CampaignManager
-# from src.workflows.ideation_workflow import IdeationWorkflow # Consider moving import if only used in one place
+from src.workflows.ideation_workflow import IdeationWorkflow # Consider moving import if only used in one place
 # from src.agents.cec_agent import CECAgent # Exemplo de agente inicial
 
 async def run_simulation_cycle(company_state: CompanyState, llm_integration: LLMIntegration):
@@ -29,12 +29,17 @@ async def run_simulation_cycle(company_state: CompanyState, llm_integration: LLM
     #     print("ALERTA: CECAgent não encontrado.")
 
     # 2. Executar Workflows (ex: IdeationWorkflow)
-    # from src.workflows.ideation_workflow import IdeationWorkflow # Import localmente ou no topo se usado em mais lugares
-    # ideation_wf_id = f"ideation_cycle_{company_state.current_cycle}"
-    # print(f"Criando IdeationWorkflow com ID: {ideation_wf_id}")
-    # ideation_wf = IdeationWorkflow(workflow_id=ideation_wf_id, company_state=company_state)
-    # await ideation_wf.run()
-    # print(f"IdeationWorkflow status: {ideation_wf.status.value}")
+    # O import foi movido para o topo do arquivo.
+    ideation_wf_id = f"ideation_cycle_{company_state.current_cycle}"
+    print(f"Criando IdeationWorkflow com ID: {ideation_wf_id}")
+    ideation_wf = IdeationWorkflow(
+        workflow_id=ideation_wf_id,
+        company_state=company_state,
+        llm_integration=llm_integration,
+        settings={} # Passando um dicionário de settings vazio por enquanto, pode ser populado se necessário.
+    )
+    await ideation_wf.run()
+    print(f"IdeationWorkflow status: {ideation_wf.status.value}")
 
     # 3. Agentes executam tarefas atribuídas
     # (Lógica para iterar sobre agentes e fazer com que executem tarefas pendentes)
@@ -76,7 +81,8 @@ async def main(args):
         company_name=app_config_dict.get("COMPANY_NAME", "EDA (Main)"),
         starting_balance=float(app_config_dict.get("STARTING_BALANCE", 50000.0)),
         llm_provider=app_config_dict.get("LLM_PROVIDER", "mock"),
-        default_llm_model=app_config_dict.get("DEFAULT_LLM_MODEL", "mock_model")
+        default_llm_model=app_config_dict.get("DEFAULT_LLM_MODEL", "mock_model"),
+        openai_api_key=app_config_dict.get("OPENAI_API_KEY")
         # Adicionar outras configurações conforme necessário
     )
     print(f"Configurações da Empresa: {company_settings.company_name}, Provider LLM: {company_settings.llm_provider}")
