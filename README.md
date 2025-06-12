@@ -5,13 +5,6 @@ Este repositório contém um esqueleto simples para simular uma "empresa digital
 O arquivo principal é `empresa_digital.py`, que define as classes `Agente` e
 `Local` e diversas funções de utilidade para manipular agentes e locais.
 
-Para executar o exemplo de uso basta rodar:
-
-```bash
-python empresa_digital.py
-```
-
-
 Ao ser executado o sistema **cria tudo sozinho**: salas, agentes e objetivos
 iniciais surgem automaticamente. A escolha do modelo LLM de cada agente é
 decidida em tempo real por uma LLM que analisa a função do agente e a lista de
@@ -54,6 +47,51 @@ Necessária para a funcionalidade de criação e publicação automática de pro
 - **Método 1 (Recomendado):** Crie um arquivo chamado `.gumroad_key` na raiz do projeto e cole seu Access Token da Gumroad nele.
 - **Método 2:** Defina a variável de ambiente `GUMROAD_API_KEY` com o valor do seu Access Token.
 O arquivo `.gumroad_key` também está incluído no `.gitignore`.
+
+## Running the Application
+
+Existem duas formas principais de executar a simulação:
+
+### Usando a Interface de Linha de Comando (CLI)
+Esta é a forma recomendada para executar simulações e interagir com a empresa digital. O script `cli.py` oferece diversos comandos para controlar e observar a simulação.
+
+Para ver a lista de comandos disponíveis e suas opções, execute:
+```bash
+python cli.py --help
+```
+
+Por exemplo, para executar a simulação por um número específico de ciclos:
+```bash
+python cli.py ciclo --cycles N
+```
+(Substitua N pelo número de ciclos desejado)
+
+Para retomar uma simulação a partir de dados salvos anteriormente:
+```bash
+python cli.py ciclo --resume
+```
+
+O CLI também permite listar agentes, locais, obter o status do lucro, entre outras funcionalidades. Certifique-se de que as chaves de API (OpenRouter e, opcionalmente, Gumroad) estejam configuradas conforme a seção "Configuração".
+
+### Rodando o Servidor da API
+Você pode iniciar o servidor FastAPI backend diretamente. Isso é útil para desenvolvimento, para interagir com a API usando ferramentas como `curl` ou Postman, ou se você estiver construindo uma interface personalizada.
+
+Para iniciar o servidor:
+```bash
+python start_backend.py
+```
+O script `start_backend.py` irá:
+1. Solicitar as chaves de API (OpenRouter e Gumroad), se ainda não estiverem configuradas.
+2. Instalar as dependências Python listadas em `requirements.txt` (se necessário).
+3. Iniciar o backend FastAPI, geralmente na porta 8000.
+
+Após iniciado, o backend ficará acessível em `http://localhost:8000` (ou na porta informada pela variável de ambiente `BACKEND_PORT`). Todos os endpoints da API podem ser consumidos.
+
+Você pode passar argumentos para `start_backend.py`, como sua chave OpenRouter:
+```bash
+python start_backend.py --apikey SUA_OPENROUTER_KEY
+```
+Use `python start_backend.py --help` para ver as opções disponíveis.
 
 ## Decisões via LLM (Modelos de Linguagem Grandes)
 
@@ -123,15 +161,15 @@ Ele é executado a cada ciclo de simulação e verifica se alguma sala ou funç�
 está com menos agentes do que o mínimo configurado. Caso haja carência ou
 tarefas registradas em `tarefas_pendentes`, o módulo cria automaticamente um
 novo agente (com nome e modelo padrão) e registra a contratação no log. Os
-agentes gerados participam normalmente dos próximos ciclos e aparecem no
-dashboard. Novas tarefas podem ser adicionadas pela função `adicionar_tarefa`.
+agentes gerados participam normalmente dos próximos ciclos. Novas tarefas podem
+ser adicionadas pela função `adicionar_tarefa`.
 
 ## Lucro virtual
 
 Cada ciclo contabiliza receitas e custos gerando um **saldo** global. A receita
 é obtida quando agentes executam ações com sucesso (10 unidades por ação) e os
 custos incluem um salário fixo de 5 por agente mais 1 unidade por recurso da
-sala utilizada. O histórico do saldo é registrado e exibido no dashboard.
+sala utilizada. O histórico do saldo é registrado.
 
 O RH somente contrata novos agentes quando o saldo é positivo e existem tarefas
 pendentes, sinalizando perspectiva de aumento de lucro. Os prompts de decisão e
@@ -144,7 +182,7 @@ criados para acelerar a entrega de MVPs e gerar mais receita.
 ## Ciclo Criativo Automatizado e Criação de Produtos
 
 O módulo `ciclo_criativo.py` adiciona um fluxo de ideação e validação em cada
-`/ciclo/next`. Agentes com função **Ideacao** propõem produtos ou campanhas e
+`/ciclo/next` (quando disparado pela API ou pelo CLI). Agentes com função **Ideacao** propõem produtos ou campanhas e
 justificam o potencial de lucro. Em seguida, agentes com função **Validador**
 avaliam riscos, recursos disponíveis e experiências anteriores.
 
@@ -192,7 +230,7 @@ Para garantir que a simulação permaneça sempre dinâmica e não pare por falt
 *   **Geração Automática de Tarefas e Ideias:** Se não houver tarefas pendentes ou nenhuma nova ideia for proposta pelos agentes, o sistema automaticamente gera tarefas e ideias genéricas para manter o fluxo de trabalho.
 *   **Fundo de Emergência para RH:** Em situações críticas (saldo zero, pouquíssimos agentes e tarefas urgentes), o RH tem uma chance de ativar um fundo de emergência para realizar contratações essenciais.
 
-Além disso, um **Modo Vida Infinita** opcional pode ser ativado (configurando a variável `MODO_VIDA_INFINITA` em `empresa_digital.py` para `True`). Neste modo:
+Além disso, um **Modo Vida Infinita** opcional pode ser ativado ao iniciar a aplicação (por exemplo, com a flag `--infinite` nos scripts `start_backend.py` ou `cli.py`). Neste modo:
 
 *   O saldo da empresa é constantemente reabastecido com valores generosos.
 *   Um número maior de tarefas e ideias ambiciosas são geradas automaticamente.
@@ -202,12 +240,7 @@ Este modo é útil para demonstrações contínuas e testes de estresse do siste
 ## API REST
 
 A aplicação possui uma API REST construída com **FastAPI** disponível no arquivo `api.py`.
-Para utilizar instale as dependências e execute o servidor com o `uvicorn`:
-
-```bash
-pip install -r requirements.txt
-uvicorn api:app --reload
-```
+Para interagir com a API, você pode iniciar o servidor usando `python start_backend.py` e então enviar requisições HTTP para os endpoints.
 
 Os principais endpoints retornam dados em JSON:
 
@@ -224,64 +257,6 @@ Os principais endpoints retornam dados em JSON:
 - `GET /eventos` - retorna o histórico de eventos registrados.
 - `GET /ideias` - retorna o histórico de ideias (incluindo links de produtos, se criados).
 
-
-## Dashboard React
-
-O diretório `dashboard` contém uma aplicação React que **apenas exibe** o que está acontecendo na empresa. Não existem mais formulários de criação ou edição manual. Para rodar em modo de desenvolvimento instale as dependências e execute:
-
-```bash
-cd dashboard
-npm install
-npm run dev
-```
-
-O mapa e as tabelas são atualizados a cada ciclo disparado pelo botão "Próximo ciclo" e apenas refletem as decisões automáticas do backend.
-
-## Inicializador Automático
-
-Para subir todo o sistema com um único comando existe o script `start_empresa.py`.
-Ele instala dependências, solicita as chaves de API (OpenRouter e Gumroad, se não configuradas) na primeira execução e
-inicia backend e frontend de forma integrada:
-
-```bash
-python start_empresa.py
-```
-
-Etapas realizadas pelo script:
-
-1. Caso não existam os arquivos `.openrouter_key` e `.gumroad_key` (ou as variáveis de ambiente correspondentes não estejam definidas), pede as respectivas API Keys e salva localmente. Esses arquivos armazenam as chaves e devem permanecer privados (já estão listados no `.gitignore`).
-2. Instala os pacotes Python listados em `requirements.txt`.
-3. Garante que as dependências do dashboard estejam instaladas (`npm install`).
-4. Inicia o backend na porta 8000 e aguarda ele ficar disponível.
-5. Inicia o frontend na porta 5173 e mostra os endereços de acesso.
-6. Consulta a API para informar quais agentes e salas foram criados automaticamente.
-7. Dispara automaticamente o primeiro ciclo da simulação e envia os eventos iniciais para o dashboard.
-
-Após a primeira execução as chaves são reutilizadas e o sistema pode ser iniciado
-novamente apenas rodando o mesmo comando.
-
-Durante o carregamento o dashboard exibe a mensagem **"Carregando/Iniciando a
-empresa..."**. Assim que o backend responde, a interface mostra as salas,
-agentes e um painel de eventos em tempo real demonstrando o raciocínio e as
-decisões de cada agente.
-
-## Inicializador para automação
-
-Para cenários sem interface visual há o script `start_backend.py`. Ele
-inicia apenas o backend FastAPI e já executa todo o processo de
-inicialização automática (salas, agentes, ciclo criativo, RH). As chaves de API
-podem ser passadas diretamente pelas flags (ex: `--apikey OPENROUTER_KEY_VALUE` e `--gumroadkey GUMROAD_KEY_VALUE`),
-que têm prioridade sobre variáveis de ambiente ou arquivos locais.
-Há também a flag `--infinite` para ativar o **Modo Vida Infinita**.
-
-```bash
-python start_backend.py --apikey SUA_OPENROUTER_KEY --gumroadkey SUA_GUMROAD_KEY --infinite
-```
-
-O backend ficará acessível em `http://localhost:8000` (ou na porta
-informada em `BACKEND_PORT`). Todos os endpoints podem ser consumidos pelo
-`cli.py` ou por agentes externos para testes e simulações automatizadas.
-
 ## Testes Automatizados
 
 Uma bateria de testes em `pytest` valida as partes isoladas do sistema e o comportamento integrado.
@@ -290,7 +265,6 @@ Para executar todos os testes:
 
 ```bash
 # instalar dependências do backend e o pytest
-# (o arquivo `requirements.txt` fixa o `httpx` na versão 0.23.x)
 pip install -r requirements.txt pytest
 
 # defina as chaves de API (OpenRouter e, opcionalmente, Gumroad para testes de produto)
@@ -316,63 +290,9 @@ estão organizados em:
   principais e do processo de seleção automática de modelos.
 - `tests/test_integration.py`, `tests/test_simulation.py` e `tests/test_rh_auto.py`
   – integração entre módulos como RH, ciclo criativo e cálculo de lucro.
-- `tests/test_end_to_end.py` e `tests/test_frontend_api.py` – simulam a
-  inicialização completa e ciclos via API, garantindo atualização da interface.
+- `tests/test_end_to_end.py` e `tests/test_api_event_cycle.py` (anteriormente `test_frontend_api.py`) – simulam a
+  inicialização completa e ciclos via API.
 - `tests/test_resilience.py` – cenários de erro e validação de mensagens.
 
 Todos devem passar indicando que a empresa digital consegue se comportar de forma
 autônoma e resiliente.
-
-## CLI para automação
-
-Um utilitário de linha de comando está disponível no arquivo `cli.py`. Ele
-permite interagir com o backend sem a interface web, desde que o servidor esteja
-rodando.
-
-Exemplos básicos:
-
-```bash
-# listar agentes
-python cli.py agentes
-
-# executar um ciclo
-python cli.py ciclo
-
-# obter os modelos gratuitos da OpenRouter
-python cli.py modelos
-```
-
-O utilitário lê as variáveis de ambiente (`OPENROUTER_API_KEY`, `GUMROAD_API_KEY`) ou os arquivos locais (`.openrouter_key`, `.gumroad_key`) para acessar endpoints que consultam serviços externos.
-
-### Operando tudo via CLI
-
-Para rodar a empresa digital apenas pela linha de comando:
-
-1. Garanta que as dependências do backend estejam instaladas (`pip install -r requirements.txt`).
-2. Inicie o backend informando as chaves diretamente nas flags e, opcionalmente, ative o modo infinito:
-
-   ```bash
-   python start_backend.py --apikey SUA_OPENROUTER_KEY --gumroadkey SUA_GUMROAD_KEY --infinite
-   ```
-
-   O script imprime onde os dados são salvos e, quando o servidor está pronto,
-   exibe quais agentes e salas foram criados automaticamente.
-
-4. Em outro terminal, utilize `cli.py` para consultar e controlar o sistema:
-
-   ```bash
-   # listar agentes existentes
-   python cli.py agentes
-
-   # listar salas disponíveis
-   python cli.py locais
-
-   # executar um ciclo completo (RH, ideias, lucro, criação de produtos)
-   python cli.py ciclo
-   ```
-
-   A execução do ciclo retorna o saldo atualizado e os eventos do turno,
-   possibilitando monitorar a evolução sem qualquer interface gráfica.
-
-Esses comandos permitem inicializar a empresa, verificar o estado corrente e
-rodar novos ciclos totalmente via linha de comando.
