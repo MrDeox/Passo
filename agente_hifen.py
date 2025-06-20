@@ -8,9 +8,10 @@ import subprocess
 import logging
 import glob
 import re
-from datetime import datetime
+# from datetime import datetime # Movido para utils.py
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
+from utils import VersaoAnterior # Importa a nova classe
 
 # Configuração do logger
 def setup_logger(name, log_file='agente_hifen.log', level=logging.INFO):
@@ -103,15 +104,16 @@ class AgentHifen:
         self.cerebro = CerebroExterno()
         self.log_anterior = log_anterior
         self.restart_count = int(os.getenv("AGENT_RESTART_COUNT", "0"))
+        self.version_manager = VersaoAnterior(agent_file_path=__file__) # Instancia o gestor de versão
         self.logger.info(f"AgentHifen inicializado (restart #{self.restart_count})")
     
-    def criar_backup(self, codigo: str) -> None:
-        """Cria backup do código atual com timestamp"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"backup_logs/backup_{timestamp}.py"
-        with open(backup_path, 'w', encoding='utf-8') as f:
-            f.write(codigo)
-        self.logger.info(f"Backup criado: {backup_path}")
+    # def criar_backup(self, codigo: str) -> None: # Movido para VersaoAnterior
+    #     """Cria backup do código atual com timestamp"""
+    #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    #     backup_path = f"backup_logs/backup_{timestamp}.py"
+    #     with open(backup_path, 'w', encoding='utf-8') as f:
+    #         f.write(codigo)
+    #     self.logger.info(f"Backup criado: {backup_path}")
 
     async def instalar_dependencia(self, nome_pacote: str) -> bool:
         self.logger.debug(f"Instalando dependência: {nome_pacote}")
@@ -194,7 +196,7 @@ class AgentHifen:
 
     def aplicar_modificacao(self, codigo_atual: str, codigo_novo: str) -> None:
         self.logger.info("Aplicando modificação...")
-        self.criar_backup(codigo_atual)  # Backup antes de modificar
+        self.version_manager.criar_backup(codigo_atual)  # Backup antes de modificar
         
         with open(__file__, 'w', encoding='utf-8') as f:
             f.write(codigo_novo)
@@ -218,23 +220,23 @@ class AgentHifen:
         ])
         exit(0)
 
-    def restaurar_backup_recente(self) -> bool:
-        """Restaura o backup mais recente em caso de falha crítica"""
-        backups = glob.glob("backup_logs/backup_*.py")
-        if not backups:
-            return False
+    # def restaurar_backup_recente(self) -> bool: # Movido para VersaoAnterior
+    #     """Restaura o backup mais recente em caso de falha crítica"""
+    #     backups = glob.glob("backup_logs/backup_*.py")
+    #     if not backups:
+    #         return False
             
-        backups.sort(reverse=True)
-        backup_recente = backups[0]
+    #     backups.sort(reverse=True)
+    #     backup_recente = backups[0]
         
-        with open(backup_recente, 'r', encoding='utf-8') as f:
-            codigo_backup = f.read()
+    #     with open(backup_recente, 'r', encoding='utf-8') as f:
+    #         codigo_backup = f.read()
         
-        with open(__file__, 'w', encoding='utf-8') as f:
-            f.write(codigo_backup)
+    #     with open(__file__, 'w', encoding='utf-8') as f:
+    #         f.write(codigo_backup)
             
-        self.logger.critical(f"RESTAURADO BACKUP: {backup_recente}")
-        return True
+    #     self.logger.critical(f"RESTAURADO BACKUP: {backup_recente}")
+    #     return True
 
     async def ciclo_de_aprimoramento(self):
         self.logger.info("Iniciando ciclo de autoaprimoramento...")
@@ -243,10 +245,16 @@ class AgentHifen:
         # Verificador de falha crítica antes de continuar
         if re.search(r"Traceback|FATAL|CRITICAL", self.log_anterior, re.IGNORECASE):
             self.logger.warning("Falha crítica detectada na execução anterior")
-            if self.restaurar_backup_recente():
+            # Usa o version_manager para restaurar o backup
+            if self.version_manager.restaurar_backup_recente():
                 self.logger.info("Reiniciando com versão estável...")
-                subprocess.Popen([sys.executable, __file__, ""])
+                # Passa o log anterior vazio para evitar loop de restauração se o backup também falhar
+                subprocess.Popen([sys.executable, __file__, "", str(self.restart_count + 1)])
                 exit(0)
+            else:
+                self.logger.error("Falha ao restaurar backup. O agente pode estar em um estado irrecuperável.")
+                # Considerar uma ação mais drástica aqui se necessário
+                return # Aborta o ciclo
         
         # Limite máximo de reinicializações
         if self.restart_count > 5:
@@ -256,36 +264,103 @@ class AgentHifen:
         self.logger.info("Consultando cérebro especialista em código...")
         hipotese_bruta = await self.cerebro.gerar_hipotese(codigo, self.log_anterior)
         self.logger.info("Hipótese bruta recebida")
+
+        # Nova lógica de detecção e tratamento de ModuleNotFoundError
+        if "ModuleNotFoundError" in self.log_anterior:
+            self.logger.info("Detectado 'ModuleNotFoundError' no log anterior.")
+            match = re.search(r"No module named '([^']*)'", self.log_anterior)
+            if match:
+                nome_modulo = match.group(1)
+                self.logger.info(f"Módulo ausente identificado: {nome_modulo}")
+                if await self.instalar_dependencia(nome_modulo):
+                    self.logger.info(f"Módulo {nome_modulo} instalado. Reiniciando para aplicar alterações.")
+                    # Reinicia o agente, idealmente o log anterior para a próxima execução não conterá o ModuleNotFoundError
+                    # ou será o log da própria instalação.
+                    # Passa um log_anterior vazio ou um log específico da instalação.
+                    # Incrementa o restart_count para o reinício.
+                    current_log = "" # Poderia ser o log da instalação se fosse capturado de forma útil
+                    try:
+                        with open("agente_hifen.log", "r") as log_file: # Pega o log atual para passar adiante
+                           current_log = log_file.read()
+                    except Exception as e:
+                        self.logger.error(f"Nao foi possivel ler o log do agente: {e}")
+
+                    os.environ["AGENT_RESTART_COUNT"] = str(self.restart_count + 1)
+                    subprocess.Popen([
+                        sys.executable,
+                        __file__,
+                        base64.b64encode(current_log.encode()).decode(), # Passa o log atual como log_anterior
+                        str(self.restart_count + 1)
+                    ])
+                    exit(0)
+                else:
+                    self.logger.error(f"Falha ao instalar o módulo {nome_modulo}. O agente pode não conseguir continuar.")
+                    # Decide se aborta ou tenta outra estratégia (ex: pedir ajuda ao LLM para corrigir o nome do pacote)
+                    return # Aborta o ciclo atual
+            else:
+                self.logger.warning("ModuleNotFoundError detectado, mas não foi possível extrair o nome do módulo.")
         
-        # Verificar se é um comando de instalação
+        # Verificar se a hipótese bruta é um comando de instalação JSON (do LLM)
+        # Esta lógica é mantida caso o LLM sugira uma instalação diretamente.
         try:
-            resposta = json.loads(hipotese_bruta)
-            if resposta.get('acao') == 'instalar':
-                pacote = resposta.get('pacote')
+            resposta_json = json.loads(self.limpar_hipotese(hipotese_bruta)) # Limpa antes de tentar o parse
+            if isinstance(resposta_json, dict) and resposta_json.get('acao') == 'instalar':
+                pacote = resposta_json.get('pacote')
                 if pacote:
-                    self.logger.info(f"Instalando pacote: {pacote}")
+                    self.logger.info(f"LLM solicitou instalação do pacote: {pacote}")
                     if await self.instalar_dependencia(pacote):
-                        self.logger.info("Reiniciando agente após instalação...")
-                        with open("agente_hifen.log", "r") as log_file:
-                            log_atual = log_file.read()
-                        os.environ["AGENT_RESTART_COUNT"] = str(self.restart_count)
-                        subprocess.run([sys.executable, __file__, base64.b64encode(log_atual.encode()).decode()])
+                        self.logger.info(f"Pacote {pacote} instalado por solicitação do LLM. Reiniciando...")
+                        current_log = ""
+                        try:
+                            with open("agente_hifen.log", "r") as log_file:
+                               current_log = log_file.read()
+                        except Exception as e:
+                            self.logger.error(f"Nao foi possivel ler o log do agente: {e}")
+
+                        os.environ["AGENT_RESTART_COUNT"] = str(self.restart_count + 1)
+                        subprocess.Popen([
+                            sys.executable,
+                            __file__,
+                            base64.b64encode(current_log.encode()).decode(),
+                            str(self.restart_count + 1)
+                        ])
                         exit(0)
                     else:
-                        self.logger.error("Falha na instalação. Abortando ciclo.")
+                        self.logger.error(f"Falha ao instalar o pacote {pacote} solicitado pelo LLM. Abortando ciclo.")
                         return
         except json.JSONDecodeError:
-            pass  # Não é um JSON, continua o fluxo normal
+            # Não é um JSON de instalação, provavelmente é código
+            pass
         
         hipotese_limpa = self.limpar_hipotese(hipotese_bruta)
         
-        if self.validar_hipotese(hipotese_limpa):
-            self.aplicar_modificacao(codigo, hipotese_limpa)
-        else:
-            self.logger.error("Ciclo abortado. A hipótese foi descartada por ser inválida. Nenhuma modificação aplicada.")
-            return  # Aborta o ciclo completamente
+        # A validação e aplicação ocorrem apenas se não houver uma ação de instalação bem-sucedida que reinicie o agente
+        # ou se a hipótese não for um JSON de instalação.
+        # Se a hipotese_limpa for um JSON (ex: comando de instalação que falhou em ser tratado acima ou outro comando JSON),
+        # não deve ser tratado como código para aplicar_modificacao.
+        is_json_command = False
+        try:
+            json_object = json.loads(hipotese_limpa)
+            if isinstance(json_object, dict) and "acao" in json_object:
+                is_json_command = True
+                self.logger.info(f"Hipótese limpa é um comando JSON: {hipotese_limpa}, não será aplicada como código.")
+        except json.JSONDecodeError:
+            pass # Não é JSON, provavelmente código
+
+        if not is_json_command:
+            if self.validar_hipotese(hipotese_limpa):
+                self.aplicar_modificacao(codigo, hipotese_limpa)
+            else:
+                self.logger.error("Ciclo abortado. A hipótese de modificação de código foi descartada por ser inválida. Nenhuma modificação aplicada.")
+                return # Aborta o ciclo se a modificação do código for inválida
+        elif not hipotese_limpa: # Se a hipótese bruta era vazia e a limpa também é
+             self.logger.error("Hipótese bruta ou limpa está vazia. Nenhuma ação tomada.")
+             return
+
 
 if __name__ == "__main__":
+    # O diretório de logs de backup agora é criado pela instância de VersaoAnterior,
+    # mas podemos garantir que exista aqui também, caso seja usado antes da instanciação.
     os.makedirs("backup_logs", exist_ok=True)
     log_anterior = ""
     restart_count = 0
