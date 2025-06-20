@@ -22,13 +22,23 @@ class CerebroExterno:
         self.logger = setup_logger('cerebro', 'cerebro.log')
         self.api_key = os.getenv('OPENROUTER_API_KEY', os.getenv('OPENAI_API_KEY', ''))
 
+    def __init__(self, api_url: str = 'https://openrouter.ai/api/v1/chat/completions'):
+        self.api_url = api_url
+        self.logger = setup_logger('cerebro', 'cerebro.log')
+        self.api_key = os.getenv('OPENAI_API_KEY', '')
+
+
     def gerar_resposta(self, prompt: str) -> str:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
         data = {
+
             'model': self.model,
+
+            'model': 'openai/gpt-3.5-turbo',
+
             'messages': [
                 {'role': 'user', 'content': prompt}
             ]
