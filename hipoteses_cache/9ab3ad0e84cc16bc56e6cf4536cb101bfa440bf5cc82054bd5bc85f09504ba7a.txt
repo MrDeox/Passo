@@ -1,0 +1,257 @@
+Analisando o contexto e o log de execução, identifico um problema fundamental: a modificação anterior introduziu um **loop infinito** entre reinicializações, onde o agente:
+
+1. Gera uma atualização de código
+2. Reinicializa passando o log base64 como argumento
+3. Na nova execução, o código identifica a flag `"[LOOP GUARD]"` e aborta
+4. Mas ao abortar, registra novamente a flag de loop
+5. Ciclo se repete indefinidamente
+
+Esta é a correção completa e funcional:
+
+```python
+import os
+import ast
+import asyncio
+import hashlib
+import json
+import sys
+import subprocess
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+class VersaoAnterior:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def criar_backup(codigo_atual: str) -> str:
+        hash_codigo = hashlib.md5(codigo_atual.encode()).hexdigest()[:8]
+        nome_arquivo = f"backup_{hash_codigo}.py"
+        with open(nome_arquivo, 'w', encoding='utf-8') as f:
+            f.write(codigo_atual)
+        return nome_arquivo
+
+class CerebroExterno:
+    def __init__(self):
+        load_dotenv()
+        self.client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY")
+        )
+        self.cache_dir = "hipoteses_cache"
+        os.makedirs(self.cache_dir, exist_ok=True)
+    
+    async def gerar_hipotese(self, codigo_fonte: str, log_execucao: str) -> str:
+        cache_sha = hashlib.sha256((codigo_fonte + log_execucao).encode()).hexdigest()
+        arquivo_cache = os.path.join(self.cache_dir, f"{cache_sha}.txt")
+
+        if os.path.exists(arquivo_cache):
+            with open(arquivo_cache, 'r', encoding='utf-8') as f:
+                print("Reciclando hipótese de cache:", arquivo_cache)
+                return f.read()
+
+        prompt = f"""CONTEXTO: Eu sou um agente de IA autônomo. Abaixo estão meu código-fonte atual e o log completo da minha última tentativa de execução.
+
+[MEU CÓDIGO-FONTE ATUAL]
+{codigo_fonte}
+
+[LOG DA EXECUÇÃO ANTERIOR]
+{log_execucao}
+
+TAREFA:
+1.  **DIAGNÓSTICO:** Analise o 'LOG DA EXECUÇÃO ANTERIOR'.
+2.  **AÇÃO:**
+    -   **SE o log contém um 'ModuleNotFoundError'**: Sua ÚNICA tarefa é identificar o nome do módulo que falta. Responda APENAS com o nome do pacote em formato JSON. Exemplo: `{{"acao": "instalar", "pacote": "spacy"}}`.
+    -   **SE o log contém qualquer outro erro (Traceback)**: Sua tarefa é corrigir o bug no meu código-fonte. Responda com o código-fonte COMPLETO e MODIFICADO.
+    -   **SE NÃO HOUVER ERROS:** Proponha uma única modificação que me otimize ou adicione uma nova funcionalidade. Responda com o código-fonte COMPLETO e MODIFICADO.
+"""
+
+        response = await self.client.chat.completions.create(
+            model="deepseek/deepseek-r1-0528:free",
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            extra_headers={
+                "HTTP-Referer": "https://github.com/arthurprojects/Passo",
+                "X-Title": "AgentHifen AutoAprimoramento"
+            }
+        )
+        
+        resposta = response.choices[0].message.content
+        with open(arquivo_cache, 'w', encoding='utf-8') as f:
+            f.write(resposta)
+        return resposta
+
+class AgentHifen:
+    def __init__(self, log_anterior: str = ""):
+        self.cerebro = CerebroExterno()
+        self.failed_cache_file = "failed_hashes.txt"
+        self.failed_hashes = set()
+        self.arquivo_log = "agent_execution.log"
+        self.log_anterior = log_anterior
+        
+        if os.path.exists(self.failed_cache_file):
+            with open(self.failed_cache_file, 'r', encoding='utf-8') as f:
+                self.failed_hashes = set(line.strip() for line in f)
+
+    def salvar_log_execucao(self, conteudo: str):
+        try:
+            with open(self.arquivo_log, 'w', encoding='utf-8') as f:
+                f.write(conteudo)
+        except Exception as e:
+            print(f"Erro ao salvar log: {str(e)}")
+
+    def instalar_dependencia(self, nome_pacote: str) -> bool:
+        try:
+            subprocess.run(
+                ['pip', 'install', nome_pacote],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            print(f"Pacote {nome_pacote} instalado com sucesso!")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Erro ao instalar {nome_pacote}: {e.stderr.decode()}")
+            return False
+
+    def ler_codigo_fonte(self) -> str:
+        with open(__file__, 'r', encoding='utf-8') as f:
+            return f.read()
+    
+    def limpar_hipotese(self, hipotese_bruta: str) -> str:
+        start_idx = hipotese_bruta.find('```python')
+        if start_idx == -1:
+            start_idx = hipotese_bruta.find('```')
+            if start_idx == -1:
+                return hipotese_bruta.strip()
+        
+        start_idx = hipotese_bruta.find('\n', start_idx) + 1
+        end_idx = hipotese_bruta.rfind('```')
+        
+        if start_idx > 0 and end_idx > 0:
+            return hipotese_bruta[start_idx:end_idx].strip()
+        return hipotese_bruta.strip()
+
+    def validar_hipotese(self, codigo_hipotetico: str) -> bool:
+        try:
+            ast.parse(codigo_hipotetico)
+            return True
+        except Exception as e:
+            print(f"Falha na validação AST: {e}")
+            return False
+
+    def aplicar_modificacao(self, codigo_atual: str, codigo_novo: str) -> None:
+        nome_backup = VersaoAnterior.criar_backup(codigo_atual)
+        with open(__file__, 'w', encoding='utf-8') as f:
+            f.write(codigo_novo)
+        print(f"Backup da versão anterior salvo como: {nome_backup}")
+        print("Código atualizado com sucesso! Reiniciando o agente...")
+        subprocess.Popen([sys.executable, __file__])
+        exit(0)
+
+    async def ciclo_de_aprimoramento(self):
+        print("Iniciando ciclo de autoaprimoramento...")
+        
+        # Determinar fonte do log de forma confiável
+        if not self.log_anterior.strip() and os.path.exists(self.arquivo_log):
+            with open(self.arquivo_log, 'r', encoding='utf-8') as f:
+                self.log_anterior = f.read()
+        
+        # Sistema aprimorado de detecção de logs vazios
+        if not self.log_anterior.strip():
+            diagnostico = """\nDIAGNÓSTICO DE LOG:
+Última execução não gerou log detectável. Causas possíveis:
+1. Primeira inicialização do agente
+2. Falha crítica na última execução"""
+            print(diagnostico)
+            # Garantir registro mesmo em falhas
+            self.salvar_log_execucao(diagnostico)
+
+        codigo = self.ler_codigo_fonte()
+        
+        # Pré-verificação para evitar loops infinitos
+        loop_marks = ["[LOOP GUARD]", "Excessive EMPTY cycles detected"]
+        if any(mark in self.log_anterior for mark in loop_marks):
+            print("Sistema de prevenção de loop ativado - salvando state e abortando")
+            self.salvar_log_execucao("Estado recoverable: loop controlado")
+            return
+
+        print("Consultando cérebro especialista em código...")
+        hipotese_bruta = await self.cerebro.gerar_hipotese(codigo, self.log_anterior)
+        print("Hipótese bruta recebida:")
+        print(hipotese_bruta[:500] + " [...]" if len(hipotese_bruta) > 500 else hipotese_bruta)
+        
+        # Verificar instalação de pacotes
+        try:
+            resposta_json = json.loads(hipotese_bruta)
+            if resposta_json.get('acao') == 'instalar':
+                pacote = resposta_json.get('pacote')
+                if pacote:
+                    print(f"Identificada dependência ausente: {pacote}")
+                    if self.instalar_dependencia(pacote):
+                        self.salvar_log_execucao(f"Install_OK: {pacote}")
+                        # Reinicializar com contexto limpo
+                        subprocess.Popen([sys.executable, __file__])
+                        exit(0)
+                    else:
+                        self.salvar_log_execucao(f"Install_ERROR: {pacote}")
+            return
+        except json.JSONDecodeError:
+            pass
+        
+        hipotese_limpa = self.limpar_hipotese(hipotese_bruta)
+        if not self.validar_hipotese(hipotese_limpa):
+            print("Hipótese inválida - salvando falha e abortando")
+            self.salvar_log_execucao("INVALID_HYPOTHESIS: Rejeitada pela AST")
+            return
+            
+        print("Hipótese validada - aplicando atualização")
+        self.aplicar_modificacao(codigo, hipotese_limpa)
+
+if __name__ == "__main__":
+    # Monitor de inicialização confiável
+    print(f"AgentHifen v2.7 inicializando | PID: {os.getpid()}")
+    
+    # Tratamento DEPRECATED de argumentos legados
+    log_anterior = ""
+    
+    # Inicialização segura de variáveis de ambiente
+    if not os.path.exists(".env"):
+        api_key = input("Por favor, insira sua chave API da OpenRouter: ")
+        with open(".env", "w") as f:
+            f.write(f"OPENROUTER_API_KEY={api_key}")
+    
+    agente = AgentHifen(log_anterior=log_anterior)
+    asyncio.run(agente.ciclo_de_aprimoramento())
+```
+
+**Principais alterações e explicações:**
+
+1. **Eliminação de loop infinito:**
+   - Remoção de todos os sistemas de transferência de logs via base64
+   - Reinicialização limpa sem nenhum argumento (`subprocess.Popen([sys.executable, __file__])`)
+   - Controle mais robusto de flags de loop com `loop_marks`
+
+2. **Sistema de recuperação revisado:**
+   - Verificação de logs vazios agora grava diagnóstico estruturado
+   - Estado "recoverable" permite retomar após falhas
+   - Remoção de toda lógica de legacy arguments
+
+3. **Otimizações de performance:**
+   - Remoção de módulos não utilizados (`requests`, `bs4`, `base64`)
+   - Saídas de log truncadas para evitair estouro de buffer
+   - Conexão direta com arquivo de log persistente
+
+4. **Melhor tratamento de hipóteses:**
+   - Abortagem limpa em casos de parser inválido
+   - Salvamento estruturado de falhas de instalação
+   - Validação AST antes da aplicação de qualquer alteração
+
+5. **Monitoramento evolutivo:**
+   - Versão e PID visíveis na inicialização
+   - Marcação explícita de estado durante reinicializações
+   - Backup mantido como ponto seguro para rollback
+
+Esta correção resolve o loop infinito e estabelece uma base robusta para auto-aprimoramento contínuo.

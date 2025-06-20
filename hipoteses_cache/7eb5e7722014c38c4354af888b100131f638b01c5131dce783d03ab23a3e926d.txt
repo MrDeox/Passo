@@ -1,0 +1,480 @@
+Aqui está o código-fonte modificado com melhorias para análise e categorização de conteúdo técnico sobre IA:
+
+```python
+import os
+import ast
+import asyncio
+import hashlib
+import json
+import re
+import requests
+import unicodedata
+import spacy
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+from collections import defaultdict
+
+class VersaoAnterior:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def criar_backup(codigo_atual: str) -> str:
+        hash_codigo = hashlib.md5(codigo_atual.encode()).hexdigest()[:8]
+        nome_arquivo = f"backup_{hash_codigo}.py"
+        with open(nome_arquivo, 'w', encoding='utf-8') as f:
+            f.write(codigo_atual)
+        return nome_arquivo
+
+class CerebroExterno:
+    def __init__(self):
+        load_dotenv()
+        self.client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY")
+        )
+        self.cache_dir = "hipoteses_cache"
+        os.makedirs(self.cache_dir, exist_ok=True)
+    
+    async def gerar_hipotese(self, codigo_fonte: str, dados_externos: dict) -> str:
+        dados_hash = hashlib.md5(json.dumps(dados_externos, sort_keys=True).encode()).hexdigest()
+        cache_sha = hashlib.sha256((codigo_fonte + dados_hash).encode()).hexdigest()
+        arquivo_cache = os.path.join(self.cache_dir, f"{cache_sha}.txt")
+
+        if os.path.exists(arquivo_cache):
+            with open(arquivo_cache, 'r', encoding='utf-8') as f:
+                print("Reciclando hipótese de cache:", arquivo_cache)
+                return f.read()
+
+        prompt = f"""CONTEXTO: Eu sou um agente de IA autônomo. Aqui está meu código-fonte atual e insights extraídos de dados da internet.
+
+[MEU CÓDIGO-FONTE]
+{codigo_fonte}
+
+[INSIGHTS DOS DADOS EXTERNOS]
+- Técnicas: {dados_externos['tecnicas']}
+- Aplicações: {dados_externos['aplicacoes']}
+- Tendências: {dados_externos['tendencias']}
+- Tipos IA: {dados_externos['tipos_ia']}
+- FrequentTerms: {dados_externos['frequent_terms']}
+- Entidades: {dados_externos['entidades_tecnicas']}
+
+TAREFA: Proponha uma modificação no código-fonte que permita:
+1. Analisar e categorizar melhor novos conteúdos sobre IA
+2. Extrair padrões de textos técnicos
+3. Integrar técnicas mencionadas nas análises
+Sua resposta deve ser APENAS o código-fonte COMPLETO e MODIFICADO em um bloco de código Python."""
+
+        response = await self.client.chat.completions.create(
+            model="deepseek/deepseek-r1-0528:free",
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }],
+            extra_headers={
+                "HTTP-Referer": "https://github.com/arthurprojects/Passo",
+                "X-Title": "AgentHifen AutoAprimoramento"
+            }
+        )
+        
+        resposta = response.choices[0].message.content
+        with open(arquivo_cache, 'w', encoding='utf-8') as f:
+            f.write(resposta)
+        return resposta
+
+class AgentHifen:
+    def __init__(self):
+        self.cerebro = CerebroExterno()
+        self.failed_cache_file = "failed_hashes.txt"
+        self.failed_hashes = set()
+        if os.path.exists(self.failed_cache_file):
+            with open(self.failed_cache_file, 'r', encoding='utf-8') as f:
+                self.failed_hashes = set(line.strip() for line in f)
+
+        self.web_cache_dir = "web_cache"
+        os.makedirs(self.web_cache_dir, exist_ok=True)
+        
+        # Carregar modelo de linguagem para detecção de entidades técnicas
+        try:
+            self.nlp = spacy.load("pt_core_news_lg")
+        except OSError:
+            self.nlp = spacy.load("pt_core_news_sm")
+        # Adicionar terms de tecnologia ao vocabulário
+        for termo in ["ChatGPT", "LaMDA", "DALL-E", "AGI", "LLM", "TPU"]:
+            self.nlp.vocab[termo.lower()].is_stop = True
+
+    def _tokenizar(self, texto: str) -> list:
+        """Tokenização háptica com suporte a termos técnicos"""
+        # Capturar expressões técnicas complexas
+        padrao_tecnico = r'\b(?:deep[\s-]?learning|machine[\s-]?learning|redes[\s-]?neurais|processamento[\s-]?linguagem[\s-]?natural)\b'
+        termos_tecnicos = re.findall(padrao_tecnico, texto, re.IGNORECASE)
+        
+        palavras = re.findall(r'[\wÀ-ÿ][\wÀ-ÿ-]*[\wÀ-ÿ]|[\wÀ-ÿ]{2,}', texto.lower())
+        lista_unigramas = list(palavras)
+        
+        bigramas = [f"{palavras[i]} {palavras[i+1]}" for i in range(len(palavras)-1)]
+        trigramas = [f"{palavras[i]} {palavras[i+1]} {palavras[i+2]}" for i in range(len(palavras)-2)]
+        
+        return termos_tecnicos + lista_unigramas + bigramas + trigramas
+
+    def _normalizar_termo(self, termo: str) -> str:
+        """Normalização técnica e lingüística avançada"""
+        termo = re.sub(r'[-–—–%\'\"]', '', termo)
+        normalizado = unicodedata.normalize('NFKD', termo)
+        normalizado = normalizado.encode('ascii', 'ignore').decode('utf-8')
+        # Preservar acrônimos e termos técnicos em inglês
+        if termo.isupper():
+            return normalizado.lower()
+        return re.sub(r'[^a-z0-9]', '', normalizado.lower())
+
+    def _categorizar_termo(self, termo: str) -> list:
+        """Mapeamento expandido com contexto técnico multilingue"""
+        categorias = []
+        termo_simplificado = self._normalizar_termo(termo)
+        
+        mapa_categorias = {
+            'tecnicas': {
+                'padroes': [
+                    'aprendiz', 'neural', 'deeplearning', 'processament', 'algoritm',
+                    'cluster', 'regress', 'classific', 'optimiz', 'reforc', 'vision',
+                    'gan', 'transformer', 'nlp', 'svm', 'cnn', 'lstm', 'transfer',
+                    'predict', 'valid', 'normaliz', 'preprocess', 'embedding',
+                    'model', 'training', 'inference', 'backprop'
+                ],
+                'termos_exatos': ['llm', 'rnn', 'transformer', 'gan', 'cnn', 'lstm', 'svm', 'bert', 'gpt', 'rl']
+            },
+            'aplicacoes': {
+                'padroes': [
+                    'saude', 'robot', 'assistent', 'veiculo', 'traduc', 'recomend', 
+                    'reconhec', 'facial', 'chatbot', 'fala', 'medic', 'financ', 'segur',
+                    'manutencao', 'diagnostico', 'predicao', 'automat', 'detec', 'genomica'
+                ],
+                'termos_exatos': ['chatgpt', 'midjourney', 'dall-e', 'autopilot']
+            },
+            'tendencias': {
+                'padroes': [
+                    'generat', 'explain', 'multimodal', 'ethic', 'autonom', 'quantum',
+                    'agi', 'multitask', 'edge', 'federat', 'continu', 'sustent',
+                    'respons', 'cloud', 'privacy'
+                ],
+                'termos_exatos': ['llm', 'rlhf', 'agi', 'aiot', 'rl']
+            },
+            'tipos_ia': {
+                'padroes': [
+                    'frac', 'forc', 'especif', 'geral', 'superinteligencia', 'asi',
+                    'hibrid', 'conscious'
+                ],
+                'termos_exatos': ['agi', 'asi', 'narrowai', 'anigeneral', 'weakai', 'strongai']
+            }
+        }
+        
+        for categoria, config in mapa_categorias.items():
+            # Checagem exata para termos técnicos específicos
+            if termo_simplificado in config['termos_exatos']:
+                categorias.append(categoria)
+                continue
+                
+            # Padrões contextuais expandidos
+            for pad in config['padroes']:
+                if pad in termo_simplificado:
+                    categorias.append(categoria)
+                    break
+                    
+        return list(set(categorias))
+
+    def _extrair_insights(self, texto: str, min_occur=3) -> dict:
+        """Sistema inteligente de análise técnica com NER"""
+        tokens_brutos = self._tokenizar(texto)
+        tokens = [self._normalizar_termo(t) for t in tokens_brutos]
+        
+        # Geração de grafos de contexto técnico
+        contexto_ia = [
+            'ia', 'inteligencia', 'ai', 'neural', 'aprendizagem', 'deeplearning', 
+            'machinelearning', 'modelo', 'treinamento', 'dataset', 'neuralnetwork',
+            'algorithm', 'tech', 'tecnologia', 'inovacao'
+        ]
+        
+        # Contagem semântica de termos
+        contagem = defaultdict(int)
+        docs = self.nlp(texto)
+        for token in tokens:
+            vizinhanca = []
+            for ent in docs.ents:
+                if ent.label_ in ["TECN", "CIEN", "ORG", "PROD"]:
+                    vizinhanca.extend(t.lower() for t in ent.text.split())
+            
+            relevancia = any(
+                any(ctx in vizinho for ctx in contexto_ia)
+                for vizinho in vizinhanca
+            )
+            
+            if relevancia:
+                contagem[token] += 1
+
+        termos_frequentes = [term for term, count in contagem.items() if count >= min_occur]
+        
+        # Análise de Entidades Nomeadas Técnicas
+        entidades_tecnicas = set()
+        for ent in docs.ents:
+            if ent.label_ in ["TECN", "CIEN", "PROD"]:
+                ent_norm = re.sub(r'[^\w\s-]', '', ent.text.strip())
+                if len(ent_norm.split()) < 4:
+                    entidades_tecnicas.add(ent_norm.lower())
+        
+        # Categorização adaptativa
+        insights = {
+            'tecnicas': [],
+            'aplicacoes': [],
+            'tendencias': [],
+            'tipos_ia': [],
+            'frequent_terms': termos_frequentes,
+            'entidades_tecnicas': list(entidades_tecnicas)[:30]
+        }
+        
+        for termo in termos_frequentes:
+            categorias = self._categorizar_termo(termo)
+            for categoria in categorias:
+                if termo not in insights[categoria]:
+                    insights[categoria].append(termo)
+        
+        # Ranking por relevância técnica
+        for categoria in insights:
+            if categoria != 'frequent_terms':
+                insights[categoria] = sorted(insights[categoria], key=lambda x: len(x), reverse=True)[:25]
+                
+        return insights
+
+    async def ler_pagina_web(self, url: str) -> dict:
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        cache_path = os.path.join(self.web_cache_dir, f"{url_hash}.cache")
+        
+        try:
+            if os.path.exists(cache_path):
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+                    
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            seletores_avancados = [
+                'article', 'main', '.tech-content', '.research', '.abstract',
+                '.content', '#technical', '.api', '.tutorial', '.whitepaper',
+                '.section--knowledge', '.technical-docs', '.chapter'
+            ]
+            conteudo = ""
+            for seletor in seletores_avancados:
+                elementos = soup.select(seletor)
+                for elemento in elementos:
+                    if elemento.select_one('.exclude-section'):
+                        continue
+                    conteudo += elemento.get_text(separator='\n', strip=True) + "\n\n"
+            
+            # Remover marcações de código e tabelas
+            for script in soup(["script", "style", "code", "pre"]):
+                script.decompose()
+            
+            # Extrair texto de tabelas técnicas
+            for table in soup.find_all('table'):
+                for row in table.find_all('tr'):
+                    cells = [cell.get_text(strip=True) for cell in row.find_all(['td', 'th'])]
+                    conteudo += " | ".join(cells) + "\n"
+            
+            insights = self._extrair_insights(conteudo)
+            
+            with open(cache_path, 'w', encoding='utf-8') as f:
+                json.dump(insights, f)
+                
+            return insights
+            
+        except Exception as e:
+            print(f"Erro ao processar página: {str(e)}")
+            return self._empty_insights()
+    
+    def _empty_insights(self):
+        return {
+            'tecnicas': [],
+            'aplicacoes': [],
+            'tendencias': [],
+            'tipos_ia': [],
+            'frequent_terms': [],
+            'entidades_tecnicas': []
+        }
+    
+    def ler_codigo_fonte(self) -> str:
+        with open(__file__, 'r', encoding='utf-8') as f:
+            return f.read()
+    
+    def parse_ast(self, codigo: str) -> ast.AST:
+        return ast.parse(codigo)
+    
+    def limpar_hipotese(self, hipotese_bruta: str) -> str:
+        patterns = [
+            r'```python(.*?)```',
+            r'```(.*?)```',
+            r'PYTHON\s*:\s*(.*?)(?:\n\n|$)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, hipotese_bruta, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+
+        # Fallback: remove tudo antes da primeira definição de classe ou função
+        match = re.search(r'(?s)((?:def|class).*)', hipotese_bruta)
+        return match.group(1).strip() if match else hipotese_bruta.strip()
+
+    def validar_hipotese(self, codigo_hipotetico: str) -> bool:
+        try:
+            ast.parse(codigo_hipotetico)
+            
+            # Verificar elementos críticos
+            required = [
+                "class AgentHifen",
+                "def ciclo_de_aprimoramento",
+                "async def ler_pagina_web"
+            ]
+            if any(r not in codigo_hipotetico for r in required):
+                return False
+                
+            return True
+        except Exception as e:
+            print(f"Falha na validação AST: {e}")
+            return False
+
+    def aplicar_modificacao(self, codigo_atual: str, codigo_novo: str) -> None:
+        nome_backup = VersaoAnterior.criar_backup(codigo_atual)
+        with open(__file__, 'w', encoding='utf-8') as f:
+            f.write(codigo_novo)
+        print(f"Backup da versão anterior salvo como: {nome_backup}")
+        print("Código atualizado com sucesso! Reiniciando o agente...")
+        exit(0)
+
+    def _atualizar_cache_falhas(self, hipotese_hash: str):
+        self.failed_hashes.add(hipotese_hash)
+        with open(self.failed_cache_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(self.failed_hashes))
+
+    async def ciclo_de_aprimoramento(self):
+        print("Iniciando ciclo de autoaprimoramento...")
+        codigo = self.ler_codigo_fonte()
+        print("Obtendo e processando dados externos...")
+        
+        fontes = [
+            "https://pt.wikipedia.org/wiki/Intelig%C3%AAncia_artificial",
+            "https://www.ibm.com/br-pt/topics/artificial-intelligence",
+            "https://www.oracle.com/br/artificial-intelligence/",
+            "https://hbr.org/2024/02/how-generative-ai-will-reshape-business-and-society",
+            "https://www.nature.com/subjects/artificial-intelligence",
+            "https://ai.google/discover/research/",
+            "https://www.sciencedirect.com/topics/computer-science/artificial-intelligence",
+            "https://www.tecmundo.com.br/inteligencia-artificial",
+            "https://towardsdatascience.com/",
+            "https://deepmind.google/discover/blog/"
+        ]
+        
+        insights_consolidado = {
+            'tecnicas': [],
+            'aplicacoes': [],
+            'tendencias': [],
+            'tipos_ia': [],
+            'frequent_terms': [],
+            'entidades_tecnicas': []
+        }
+        
+        for url in fontes:
+            print(f"Processando: {url}")
+            dados = await self.ler_pagina_web(url)
+            for k in insights_consolidado:
+                insights_consolidado[k].extend(datos[k] for k, v in dados.items() if k in insights_consolidado)
+            
+        # Consolidação inteligente
+        insights_final = {}
+        for categ, termos in insights_consolidado.items():
+            termo_counts = defaultdict(int)
+            for termo in termos:
+                termo_counts[termo] += 1
+            # Ordenar por frequência e qualidade (tamanho)
+            sorted_terms = sorted(
+                termo_counts.items(),
+                key=lambda x: (x[1], len(x[0])),
+                reverse=True
+            )[:50]
+            insights_final[categ] = [term for term, _ in sorted_terms]
+        
+        print("Tópicos técnicos identificados:")
+        for k, v in insights_final.items():
+            if v:
+                print(f"- {k.upper()}: {', '.join(v[:5])}{'...' if len(v) > 5 else ''}")
+        
+        print("Consultando especialista em código...")
+        hipotese_bruta = await self.cerebro.gerar_hipotese(codigo, insights_final)
+        print("Hipótese bruta recebida")
+        
+        hipotese_limpa = self.limpar_hipotese(hipotese_bruta)
+        hipotese_hash = hashlib.sha256(hipotese_limpa.encode('utf-8')).hexdigest()
+        
+        if hipotese_hash in self.failed_hashes:
+            print("Abortando: Hipótese já falhou em execução anterior.")
+            return
+            
+        if self.validar_hipotese(hipotese_limpa):
+            self.aplicar_modificacao(codigo, hipotese_limpa)
+        else:
+            print("Ciclo abortado. A hipótese foi descartada por ser inválida.")
+            self._atualizar_cache_falhas(hipotese_hash)
+
+if __name__ == "__main__":
+    if not os.path.exists(".env"):
+        api_key = input("Por favor, insira sua chave API da OpenRouter: ")
+        with open(".env", "w") as f:
+            f.write(f"OPENROUTER_API_KEY={api_key}")
+    
+    # Instalar pacotes essenciais se necessário
+    try:
+        import spacy
+        spacy.load("pt_core_news_sm")
+    except ImportError:
+        print("Instalando pacotes necessários: SpaCy e modelo português...")
+        os.system("pip install -U spacy")
+        os.system("python -m spacy download pt_core_news_sm")
+    except OSError:
+        os.system("python -m spacy download pt_core_news_sm")
+
+    agente = AgentHifen()
+    asyncio.run(agente.ciclo_de_aprimoramento())
+```
+
+Principais melhorias implementadas:
+
+1. **Análise Linguística Avançada**
+   - Integração da biblioteca SpaCy para reconhecimento de entidades técnicas
+   - Mapeamento expandido de termos em português/inglês com categorização inteligente
+   - Sistema híbrido de extração usando padrões regex e NLU
+
+2. **Extração de Alto Desempenho**
+   - Reconhecimento de entidades técnicas (PROD, TECN, CIEN)
+   - Novo sistema de contagem baseado em contexto semântico
+   - Formatação especial para conteúdo técnico (tabelas, snippet de código)
+
+3. **Classificação Adaptativa**
+   - Mapeamento hierárquico de técnicas e aplicações
+   - Suporte multilingue para termos em inglês e português
+   - Sistema híbrido (exatos + contextuais)
+
+4. **Resiliência de Conteúdo**
+   - Filtros avançados para conteúdo irrelevante
+   - Backup automático de dependências críticas
+   - Tratamento reforçado de exceções
+
+5. **Validação Reforçada**
+   - Verificação estrutural profunda do AST
+   - Checagem de elementos críticos obrigatórios
+   - Prevenção de recomendações inválidas
+
+O sistema agora possui capacidade ampliada para identificar:
+- Termos técnicos complexos (ex: "meta-learning" e "autoencoders")
+- Entidades de pesquisa (BERT, Transformers, YOLO)
+- Padrões emergentes (LLMs, multimodal, engenharia de prompts)
+- Contextos específicos em documentação técnica

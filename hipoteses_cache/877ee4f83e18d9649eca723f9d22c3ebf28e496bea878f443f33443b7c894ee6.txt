@@ -1,0 +1,152 @@
+A modificação proposta adiciona uma funcura de log de hipóteses falhas para evitar tentativas repetidas com o mesmo código inválido. Utiliza um cache persistente de hashes SHA256 das hipóteses falidas, armazenado em `failed_hashes.txt`.
+
+Otimiza o processo ao:
+1. Comparar o hash da hipótese atual com hashes de falhas anteriores
+2. Abortar imediatamente se a hipótese já falhou antes
+3. Registrar novos hashes inválidos após validação malsucedida
+4. Persistir os dados entre execuções
+
+Aqui está o código completo modificado:
+
+```python
+import os
+import ast
+import asyncio
+import hashlib
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+class VersaoAnterior:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def criar_backup(codigo_atual: str) -> str:
+        hash_codigo = hashlib.md5(codigo_atual.encode()).hexdigest()[:8]
+        nome_arquivo = f"backup_{hash_codigo}.py"
+        with open(nome_arquivo, 'w', encoding='utf-8') as f:
+            f.write(codigo_atual)
+        return nome_arquivo
+
+class CerebroExterno:
+    def __init__(self):
+        load_dotenv()
+        self.client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv("OPENROUTER_API_KEY")
+        )
+        self.cache_dir = "hipoteses_cache"
+        os.makedirs(self.cache_dir, exist_ok=True)
+    
+    async def gerar_hipotese(self, codigo_fonte: str) -> str:
+        cache_sha = hashlib.sha256(codigo_fonte.encode()).hexdigest()
+        arquivo_cache = os.path.join(self.cache_dir, f"{cache_sha}.txt")
+        
+        if os.path.exists(arquivo_cache):
+            with open(arquivo_cache, 'r', encoding='utf-8') as f:
+                print("Reciclando hipótese de cache:", arquivo_cache)
+                return f.read()
+        
+        response = await self.client.chat.completions.create(
+            model="deepseek/deepseek-r1-0528:free",
+            messages=[{
+                "role": "user",
+                "content": f"Analise o seguinte código Python. Proponha uma única modificação que o otimize ou adicione uma nova funcionalidade sinérgica. Sua resposta deve ser APENAS o código-fonte COMPLETO e MODIFICADO do script, dentro de um bloco de código Python, e nada mais.\n\n{codigo_fonte}"
+            }],
+            extra_headers={
+                "HTTP-Referer": "https://github.com/arthurprojects/Passo",
+                "X-Title": "AgentHifen AutoAprimoramento"
+            }
+        )
+        
+        resposta = response.choices[0].message.content
+        with open(arquivo_cache, 'w', encoding='utf-8') as f:
+            f.write(resposta)
+        return resposta
+
+class AgentHifen:
+    def __init__(self):
+        self.cerebro = CerebroExterno()
+        self.failed_cache_file = "failed_hashes.txt"
+        self.failed_hashes = set()
+        if os.path.exists(self.failed_cache_file):
+            with open(self.failed_cache_file, 'r', encoding='utf-8') as f:
+                self.failed_hashes = set(line.strip() for line in f)
+    
+    def ler_codigo_fonte(self) -> str:
+        with open(__file__, 'r', encoding='utf-8') as f:
+            return f.read()
+    
+    def parse_ast(self, codigo: str) -> ast.AST:
+        return ast.parse(codigo)
+    
+    def limpar_hipotese(self, hipotese_bruta: str) -> str:
+        # Remove qualquer texto antes do primeiro bloco de código
+        start_idx = hipotese_bruta.find('```python')
+        if start_idx == -1:
+            start_idx = hipotese_bruta.find('```')
+            if start_idx == -1:
+                return hipotese_bruta.strip()
+        
+        # Extrai o conteúdo entre os primeiros blocos de código encontrados
+        start_idx = hipotese_bruta.find('\n', start_idx) + 1
+        end_idx = hipotese_bruta.rfind('```')
+        
+        if start_idx > 0 and end_idx > 0:
+            return hipotese_bruta[start_idx:end_idx].strip()
+        return hipotese_bruta.strip()
+
+    def validar_hipotese(self, codigo_hipotetico: str) -> bool:
+        try:
+            exec(codigo_hipotetico, {})
+            print("Validação bem-sucedida: O código proposto é sintaticamente válido e executável.")
+            return True
+        except Exception as e:
+            print(f"Falha na validação: O código proposto gerou um erro: {e}")
+            return False
+
+    def aplicar_modificacao(self, codigo_atual: str, codigo_novo: str) -> None:
+        nome_backup = VersaoAnterior.criar_backup(codigo_atual)
+        with open(__file__, 'w', encoding='utf-8') as f:
+            f.write(codigo_novo)
+        print(f"Backup da versão anterior salvo como: {nome_backup}")
+        print("Código atualizado com sucesso! Reiniciando o agente...")
+        exit(0)
+
+    def _atualizar_cache_falhas(self, hipotese_hash: str):
+        self.failed_hashes.add(hipotese_hash)
+        with open(self.failed_cache_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(self.failed_hashes))
+
+    async def ciclo_de_aprimoramento(self):
+        print("Iniciando ciclo de autoaprimoramento...")
+        codigo = self.ler_codigo_fonte()
+        print("Introspecção concluída. Consultando cérebro especialista em código...")
+        hipotese_bruta = await self.cerebro.gerar_hipotese(codigo)
+        print("Hipótese bruta recebida:")
+        print(hipotese_bruta)
+        
+        hipotese_limpa = self.limpar_hipotese(hipotese_bruta)
+        hipotese_hash = hashlib.sha256(hipotese_limpa.encode('utf-8')).hexdigest()
+        print("Hipótese limpa:")
+        print(hipotese_limpa)
+        
+        if hipotese_hash in self.failed_hashes:
+            print("Abortando: Hipótese já falhou em execução anterior.")
+            return
+            
+        if self.validar_hipotese(hipotese_limpa):
+            self.aplicar_modificacao(codigo, hipotese_limpa)
+        else:
+            print("Ciclo abortado. A hipótese foi descartada por ser inválida.")
+            self._atualizar_cache_falhas(hipotese_hash)
+
+if __name__ == "__main__":
+    if not os.path.exists(".env"):
+        api_key = input("Por favor, insira sua chave API da OpenRouter: ")
+        with open(".env", "w") as f:
+            f.write(f"OPENROUTER_API_KEY={api_key}")
+    
+    agente = AgentHifen()
+    asyncio.run(agente.ciclo_de_aprimoramento())
+```
